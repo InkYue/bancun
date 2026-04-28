@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#160d0c" />
+    <title>半寸时光甜蜜礼物单</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <button id="musicToggle" class="volume-button" type="button" aria-label="开启背景音乐" aria-pressed="false">
+      <span aria-hidden="true">🔇</span>
+    </button>
+
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+
+    <main class="page-shell">
+      <section class="hero-card" aria-labelledby="brandName">
+        <div class="hero-orbit" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <p class="eyebrow">Sweet Gift Ceremony</p>
+        <h1 id="brandName">半寸时光</h1>
+        <p class="subtitle">甜蜜礼物单</p>
+        <div class="ribbon">* 最终解释权归半寸时光所有 *</div>
+      </section>
+
+      <section class="payment-panel" aria-labelledby="paymentTitle">
+        <div>
+          <p class="eyebrow">游客送礼</p>
+          <h2 id="paymentTitle">输入金额，跳转微信收款</h2>
+        </div>
+        <label class="amount-field" for="amountInput">
+          <span>礼物金额</span>
+          <input id="amountInput" inputmode="numeric" autocomplete="off" placeholder="例如 520" />
+        </label>
+        <p id="matchHint" class="match-hint">输入金额后会自动匹配对应礼物。</p>
+        <button id="payButton" class="primary-button" type="button">去微信支付并点亮</button>
+      </section>
+
+      <section class="gift-board" aria-labelledby="giftBoardTitle">
+        <div class="section-title">
+          <span class="butterfly">✦</span>
+          <h2 id="giftBoardTitle">普通礼物</h2>
+          <span class="butterfly">✦</span>
+        </div>
+        <div id="normalGiftGrid" class="gift-grid"></div>
+        <p class="crown-note">赠送以上 4 项任一礼物，即可获得专属冠名卡一张</p>
+
+        <div class="section-title special-title">
+          <span class="butterfly">✦</span>
+          <h2>特殊礼物</h2>
+          <span class="butterfly">✦</span>
+        </div>
+        <div id="specialGiftGrid" class="gift-grid gift-grid-special"></div>
+        <p class="crown-note">赠送以上 4 项任一礼物，即可获得动态专属冠名卡一张</p>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
