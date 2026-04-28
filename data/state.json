@@ -1,6 +1,8 @@
 {
   "brandName": "半寸时光",
   "wechatPayUrl": "weixin://wxpay/bizpayurl?pr=replace-with-your-wechat-code&amount={amount}&gift={giftName}",
+  "backgroundMusicUrl": "",
+  "giftOverrides": {},
   "litGiftIds": [],
-  "updatedAt": "2026-04-28T04:36:34.597Z"
+  "updatedAt": "2026-04-28T07:41:55.989Z"
 }
