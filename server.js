@@ -19,6 +19,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import crypto from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,8 +28,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
 const assetsDir = path.join(publicDir, 'assets');
 const employeeAssetsDir = path.join(assetsDir, 'employees');
-const dataDir = path.join(__dirname, 'data');
-const stateFile = path.join(dataDir, 'state.json');
+const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
+const legacyStateFile = path.join(dataDir, 'state.json');
+const sqliteFile = path.join(dataDir, 'state.sqlite');
+let sqliteDb = null;
 
 const port = Number.parseInt(process.env.PORT || '5173', 10);
 const bootstrapAdminPassword = process.env.ADMIN_PASSWORD || process.env.ADMIN_TOKEN || 'bancun-admin';
@@ -38,9 +41,14 @@ const defaultWechatPayUrl =
 
 const MAX_ACTIVITIES = 1000;
 const MAX_CUSTOMER_LOGINS = 1000;
+const MAX_PAYMENT_ORDERS = 1000;
 const VISITOR_FEED_LIMIT = 30;
 const SMS_CODE_TTL_MS = 5 * 60_000;
 const SMS_RESEND_INTERVAL_MS = 60_000;
+
+const defaultYipayGateway = 'https://ezfp.cn';
+const envYipayKey = process.env.YIPAY_KEY || process.env.EASYPAY_KEY || '';
+const validYipayTypes = new Set(['alipay', 'wxpay', 'qqpay', 'bank', 'jdpay', 'paypal', 'usdt']);
 
 /* ============================================================
  * 礼物目录（id 不要乱改，会影响已点亮记录）
@@ -108,6 +116,23 @@ function normalizeSiteUrl(value) {
   } catch { return ''; }
 }
 
+function normalizeYipayGateway(value) {
+  if (typeof value !== 'string') return defaultYipayGateway;
+  const trimmed = value.trim().replace(/\/+$/, '');
+  if (!trimmed) return defaultYipayGateway;
+  if (!/^https?:\/\//i.test(trimmed)) return defaultYipayGateway;
+  try {
+    const u = new URL(trimmed);
+    return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, '')}`.slice(0, 200) || defaultYipayGateway;
+  } catch { return defaultYipayGateway; }
+}
+
+function normalizeMoney(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0 || n >= 10_000_000) return '';
+  return n.toFixed(2);
+}
+
 function isValidSlug(value) {
   return typeof value === 'string' && /^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/i.test(value);
 }
@@ -154,9 +179,17 @@ function defaultState() {
       signName: '',
       templateId: ''
     },
+    yipayConfig: {
+      enabled: false,
+      gateway: defaultYipayGateway,
+      pid: '',
+      key: '',
+      type: 'wxpay'
+    },
     employees: [],
     activities: [],
     customerLogins: [],
+    paymentOrders: [],
     passwordSalt: crypto.randomBytes(8).toString('hex'),
     customerSecret: crypto.randomBytes(16).toString('hex'),
     updatedAt: new Date().toISOString()
@@ -219,8 +252,74 @@ function normalizeActivity(raw, employeeIds) {
     giftName: typeof raw.giftName === 'string' ? raw.giftName.slice(0, 40) : '',
     price: Number.isFinite(Number(raw.price)) ? Number(raw.price) : 0,
     phone: isValidPhone(raw.phone) ? raw.phone : '',
+    paymentProvider: typeof raw.paymentProvider === 'string' ? raw.paymentProvider.slice(0, 20) : '',
+    outTradeNo: typeof raw.outTradeNo === 'string' ? raw.outTradeNo.slice(0, 64) : '',
+    tradeNo: typeof raw.tradeNo === 'string' ? raw.tradeNo.slice(0, 64) : '',
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString()
   };
+}
+
+function normalizePaymentOrder(raw, employeeIds) {
+  if (!raw || typeof raw !== 'object') return null;
+  if (typeof raw.outTradeNo !== 'string' || !raw.outTradeNo) return null;
+  if (typeof raw.employeeId !== 'string' || !employeeIds.has(raw.employeeId)) return null;
+  if (typeof raw.giftId !== 'string' || !giftIds.has(raw.giftId)) return null;
+  const status = raw.status === 'paid' ? 'paid' : raw.status === 'failed' ? 'failed' : 'pending';
+  return {
+    outTradeNo: raw.outTradeNo.slice(0, 64),
+    tradeNo: typeof raw.tradeNo === 'string' ? raw.tradeNo.slice(0, 64) : '',
+    employeeId: raw.employeeId,
+    employeeSlug: isValidSlug(raw.employeeSlug) ? raw.employeeSlug.toLowerCase() : '',
+    giftId: raw.giftId,
+    giftName: typeof raw.giftName === 'string' ? raw.giftName.slice(0, 40) : '',
+    money: normalizeMoney(raw.money) || '0.00',
+    phone: isValidPhone(raw.phone) ? raw.phone : '',
+    payType: validYipayTypes.has(raw.payType) ? raw.payType : 'wxpay',
+    status,
+    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString(),
+    paidAt: typeof raw.paidAt === 'string' ? raw.paidAt : ''
+  };
+}
+
+function normalizeYipayConfig(raw) {
+  const fb = defaultState().yipayConfig;
+  if (!raw || typeof raw !== 'object') return fb;
+  return {
+    enabled: Boolean(raw.enabled),
+    gateway: normalizeYipayGateway(raw.gateway),
+    pid: normalizeText(raw.pid, '', 40),
+    key: '',
+    type: validYipayTypes.has(raw.type) ? raw.type : fb.type
+  };
+}
+
+function effectiveYipayConfig(state) {
+  return {
+    ...state.yipayConfig,
+    key: envYipayKey
+  };
+}
+
+function isYipayActuallyEnabled(cfg) {
+  return Boolean(cfg && cfg.enabled && cfg.gateway && cfg.pid && cfg.key && validYipayTypes.has(cfg.type));
+}
+
+function publicYipayConfigView(cfg) {
+  return {
+    enabled: Boolean(cfg.enabled),
+    gateway: cfg.gateway || defaultYipayGateway,
+    pid: cfg.pid ? `${cfg.pid.slice(0, 3)}****${cfg.pid.slice(-2)}` : '',
+    keySet: Boolean(cfg.key),
+    keySource: cfg.key ? 'env' : '',
+    type: validYipayTypes.has(cfg.type) ? cfg.type : 'wxpay',
+    actuallyEnabled: isYipayActuallyEnabled(cfg)
+  };
+}
+
+function trimPaymentOrders(orders) {
+  const pending = orders.filter((o) => o.status === 'pending');
+  const settled = orders.filter((o) => o.status !== 'pending').slice(0, MAX_PAYMENT_ORDERS);
+  return [...pending, ...settled];
 }
 
 function normalizeCustomerLogin(raw, employeeIds) {
@@ -297,6 +396,11 @@ function normalizeState(value) {
     .filter(Boolean)
     .slice(0, MAX_CUSTOMER_LOGINS);
 
+  const rawOrders = Array.isArray(value.paymentOrders) ? value.paymentOrders : [];
+  const paymentOrders = trimPaymentOrders(rawOrders
+    .map((o) => normalizePaymentOrder(o, employeeIds))
+    .filter(Boolean));
+
   return {
     schemaVersion: 2,
     brandName: normalizeText(value.brandName, fb.brandName, 24),
@@ -307,9 +411,11 @@ function normalizeState(value) {
       : [],
     giftOverrides: overrides,
     smsConfig: normalizeSmsConfig(value.smsConfig),
+    yipayConfig: normalizeYipayConfig(value.yipayConfig),
     employees,
     activities,
     customerLogins,
+    paymentOrders,
     passwordSalt,
     customerSecret,
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : fb.updatedAt
@@ -360,50 +466,290 @@ function migrateLegacyState(legacy) {
 }
 
 async function ensureStateFile() {
-  await fs.mkdir(dataDir, { recursive: true });
-  try {
-    const raw = JSON.parse(await fs.readFile(stateFile, 'utf8'));
-    if (!raw.schemaVersion || raw.schemaVersion < 2) {
-      // 旧 schema：迁移
-      const migrated = migrateLegacyState(raw);
-      await writeState(migrated);
-      console.log('已把旧版 state.json 迁移为 v2 schema（创建默认 admin: slug=admin）');
-      return migrated;
-    }
-    return normalizeState(raw);
-  } catch (error) {
-    if (error.code !== 'ENOENT') {
-      console.warn(`State file was unreadable, recreating it: ${error.message}`);
-    }
-    /* 全新启动：创建默认 admin */
-    const fb = defaultState();
-    const adminId = makeId('emp');
-    fb.employees = [{
-      id: adminId,
-      slug: 'admin',
-      name: '默认主页',
-      role: 'admin',
-      enabled: true,
-      passwordHash: sha256(bootstrapAdminPassword, fb.passwordSalt),
-      avatarPath: '',
-      wechatPayUrl: '',
-      wechatQrPath: '',
-      intro: '',
-      litGiftIds: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    }];
-    await writeState(fb);
-    console.log(`首次启动：已创建默认 admin（slug=admin，密码=${bootstrapAdminPassword}）`);
-    return fb;
+  const db = await ensureSqlite();
+  const state = readStateFromSqlite(db);
+  if (state.employees.length) return state;
+
+  const migrated = await readLegacyStateForMigration();
+  if (migrated) {
+    const next = (!migrated.schemaVersion || migrated.schemaVersion < 2)
+      ? migrateLegacyState(migrated)
+      : normalizeState(migrated);
+    writeStateToSqlite(db, next);
+    console.log('已把旧版 data/state.json 迁移到 data/state.sqlite');
+    return readStateFromSqlite(db);
   }
+
+  /* 全新启动：创建默认 admin */
+  const fb = defaultState();
+  const adminId = makeId('emp');
+  fb.employees = [{
+    id: adminId,
+    slug: 'admin',
+    name: '默认主页',
+    role: 'admin',
+    enabled: true,
+    passwordHash: sha256(bootstrapAdminPassword, fb.passwordSalt),
+    avatarPath: '',
+    wechatPayUrl: '',
+    wechatQrPath: '',
+    intro: '',
+    litGiftIds: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  }];
+  writeStateToSqlite(db, fb);
+  console.log(`首次启动：已创建默认 admin（slug=admin，密码=${bootstrapAdminPassword}）`);
+  return readStateFromSqlite(db);
 }
 
 async function writeState(state) {
+  const db = await ensureSqlite();
   const next = normalizeState({ ...state, updatedAt: new Date().toISOString() });
+  writeStateToSqlite(db, next);
+  return readStateFromSqlite(db);
+}
+
+async function readLegacyStateForMigration() {
+  try {
+    return JSON.parse(await fs.readFile(legacyStateFile, 'utf8'));
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.warn(`旧 state.json 不可读，跳过迁移：${error.message}`);
+    return null;
+  }
+}
+
+async function ensureSqlite() {
+  if (sqliteDb) return sqliteDb;
   await fs.mkdir(dataDir, { recursive: true });
-  await fs.writeFile(stateFile, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
-  return next;
+  sqliteDb = new DatabaseSync(sqliteFile);
+  initSqliteSchema(sqliteDb);
+  return sqliteDb;
+}
+
+function initSqliteSchema(db) {
+  db.exec(`
+    PRAGMA journal_mode = WAL;
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE IF NOT EXISTS app_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS gift_overrides (
+      gift_id TEXT PRIMARY KEY,
+      name TEXT,
+      price INTEGER,
+      category TEXT,
+      benefit TEXT,
+      image_path TEXT
+    );
+    CREATE TABLE IF NOT EXISTS disabled_gifts (
+      gift_id TEXT PRIMARY KEY
+    );
+    CREATE TABLE IF NOT EXISTS employees (
+      id TEXT PRIMARY KEY,
+      slug TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL,
+      enabled INTEGER NOT NULL,
+      password_hash TEXT NOT NULL,
+      avatar_path TEXT,
+      wechat_pay_url TEXT,
+      wechat_qr_path TEXT,
+      intro TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS employee_lit_gifts (
+      employee_id TEXT NOT NULL,
+      gift_id TEXT NOT NULL,
+      PRIMARY KEY (employee_id, gift_id),
+      FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS activities (
+      id TEXT PRIMARY KEY,
+      employee_id TEXT NOT NULL,
+      gift_id TEXT NOT NULL,
+      gift_name TEXT,
+      price REAL NOT NULL,
+      phone TEXT,
+      payment_provider TEXT,
+      out_trade_no TEXT,
+      trade_no TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS customer_logins (
+      id TEXT PRIMARY KEY,
+      phone TEXT NOT NULL,
+      employee_id TEXT,
+      method TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS payment_orders (
+      out_trade_no TEXT PRIMARY KEY,
+      trade_no TEXT,
+      employee_id TEXT NOT NULL,
+      employee_slug TEXT,
+      gift_id TEXT NOT NULL,
+      gift_name TEXT,
+      money TEXT NOT NULL,
+      phone TEXT,
+      pay_type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      paid_at TEXT,
+      FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+    );
+  `);
+}
+
+function readStateFromSqlite(db) {
+  const meta = Object.fromEntries(db.prepare('SELECT key, value FROM app_meta').all().map((r) => [r.key, r.value]));
+  const employees = db.prepare('SELECT * FROM employees ORDER BY created_at ASC').all().map((r) => ({
+    id: r.id,
+    slug: r.slug,
+    name: r.name,
+    role: r.role,
+    enabled: Boolean(r.enabled),
+    passwordHash: r.password_hash,
+    avatarPath: r.avatar_path || '',
+    wechatPayUrl: r.wechat_pay_url || '',
+    wechatQrPath: r.wechat_qr_path || '',
+    intro: r.intro || '',
+    litGiftIds: db.prepare('SELECT gift_id FROM employee_lit_gifts WHERE employee_id = ? ORDER BY gift_id ASC').all(r.id).map((x) => x.gift_id),
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
+  }));
+  const giftOverrides = {};
+  for (const r of db.prepare('SELECT * FROM gift_overrides').all()) {
+    const next = {};
+    if (r.name) next.name = r.name;
+    if (r.price !== null && r.price !== undefined) next.price = Number(r.price);
+    if (r.category) next.category = r.category;
+    if (r.benefit !== null && r.benefit !== undefined) next.benefit = r.benefit;
+    if (r.image_path) next.imagePath = r.image_path;
+    giftOverrides[r.gift_id] = next;
+  }
+  return normalizeState({
+    schemaVersion: 3,
+    brandName: meta.brandName || '半寸时光',
+    siteUrl: meta.siteUrl || '',
+    defaultWechatPayUrl: meta.defaultWechatPayUrl || defaultWechatPayUrl,
+    disabledGiftIds: db.prepare('SELECT gift_id FROM disabled_gifts ORDER BY gift_id ASC').all().map((r) => r.gift_id),
+    giftOverrides,
+    smsConfig: {
+      enabled: meta.smsEnabled === '1',
+      provider: 'tencent',
+      secretId: meta.smsSecretId || '',
+      secretKey: meta.smsSecretKey || '',
+      sdkAppId: meta.smsSdkAppId || '',
+      region: meta.smsRegion || 'ap-guangzhou',
+      signName: meta.smsSignName || '',
+      templateId: meta.smsTemplateId || ''
+    },
+    yipayConfig: {
+      enabled: meta.yipayEnabled === '1',
+      gateway: meta.yipayGateway || defaultYipayGateway,
+      pid: meta.yipayPid || '',
+      key: '',
+      type: meta.yipayType || 'wxpay'
+    },
+    employees,
+    activities: db.prepare('SELECT * FROM activities ORDER BY created_at DESC').all().map((r) => ({
+      id: r.id,
+      employeeId: r.employee_id,
+      giftId: r.gift_id,
+      giftName: r.gift_name || '',
+      price: Number(r.price) || 0,
+      phone: r.phone || '',
+      paymentProvider: r.payment_provider || '',
+      outTradeNo: r.out_trade_no || '',
+      tradeNo: r.trade_no || '',
+      createdAt: r.created_at
+    })),
+    customerLogins: db.prepare('SELECT * FROM customer_logins ORDER BY created_at DESC').all().map((r) => ({
+      id: r.id,
+      phone: r.phone,
+      employeeId: r.employee_id || '',
+      method: r.method,
+      createdAt: r.created_at
+    })),
+    paymentOrders: db.prepare('SELECT * FROM payment_orders ORDER BY created_at DESC').all().map((r) => ({
+      outTradeNo: r.out_trade_no,
+      tradeNo: r.trade_no || '',
+      employeeId: r.employee_id,
+      employeeSlug: r.employee_slug || '',
+      giftId: r.gift_id,
+      giftName: r.gift_name || '',
+      money: r.money,
+      phone: r.phone || '',
+      payType: r.pay_type,
+      status: r.status,
+      createdAt: r.created_at,
+      paidAt: r.paid_at || ''
+    })),
+    passwordSalt: meta.passwordSalt || crypto.randomBytes(8).toString('hex'),
+    customerSecret: meta.customerSecret || crypto.randomBytes(16).toString('hex'),
+    updatedAt: meta.updatedAt || new Date().toISOString()
+  });
+}
+
+function writeStateToSqlite(db, state) {
+  const next = normalizeState(state);
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    db.exec('DELETE FROM app_meta; DELETE FROM gift_overrides; DELETE FROM disabled_gifts; DELETE FROM employee_lit_gifts; DELETE FROM activities; DELETE FROM customer_logins; DELETE FROM payment_orders; DELETE FROM employees;');
+    const setMeta = db.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?)');
+    for (const [key, value] of Object.entries({
+      schemaVersion: '3',
+      brandName: next.brandName,
+      siteUrl: next.siteUrl,
+      defaultWechatPayUrl: next.defaultWechatPayUrl,
+      smsEnabled: next.smsConfig.enabled ? '1' : '0',
+      smsSecretId: next.smsConfig.secretId,
+      smsSecretKey: next.smsConfig.secretKey,
+      smsSdkAppId: next.smsConfig.sdkAppId,
+      smsRegion: next.smsConfig.region,
+      smsSignName: next.smsConfig.signName,
+      smsTemplateId: next.smsConfig.templateId,
+      yipayEnabled: next.yipayConfig.enabled ? '1' : '0',
+      yipayGateway: next.yipayConfig.gateway,
+      yipayPid: next.yipayConfig.pid,
+      yipayType: next.yipayConfig.type,
+      passwordSalt: next.passwordSalt,
+      customerSecret: next.customerSecret,
+      updatedAt: next.updatedAt
+    })) setMeta.run(key, String(value ?? ''));
+
+    const insertDisabled = db.prepare('INSERT INTO disabled_gifts (gift_id) VALUES (?)');
+    for (const id of next.disabledGiftIds) insertDisabled.run(id);
+
+    const insertOverride = db.prepare('INSERT INTO gift_overrides (gift_id, name, price, category, benefit, image_path) VALUES (?, ?, ?, ?, ?, ?)');
+    for (const [giftId, override] of Object.entries(next.giftOverrides || {})) {
+      insertOverride.run(giftId, override.name ?? null, override.price ?? null, override.category ?? null, override.benefit ?? null, override.imagePath ?? null);
+    }
+
+    const insertEmployee = db.prepare('INSERT INTO employees (id, slug, name, role, enabled, password_hash, avatar_path, wechat_pay_url, wechat_qr_path, intro, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const insertLit = db.prepare('INSERT INTO employee_lit_gifts (employee_id, gift_id) VALUES (?, ?)');
+    for (const e of next.employees) {
+      insertEmployee.run(e.id, e.slug, e.name, e.role, e.enabled ? 1 : 0, e.passwordHash, e.avatarPath, e.wechatPayUrl, e.wechatQrPath, e.intro, e.createdAt, e.updatedAt);
+      for (const giftId of e.litGiftIds || []) insertLit.run(e.id, giftId);
+    }
+
+    const insertActivity = db.prepare('INSERT INTO activities (id, employee_id, gift_id, gift_name, price, phone, payment_provider, out_trade_no, trade_no, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    for (const a of next.activities) insertActivity.run(a.id, a.employeeId, a.giftId, a.giftName, a.price, a.phone, a.paymentProvider || '', a.outTradeNo || '', a.tradeNo || '', a.createdAt);
+
+    const insertLogin = db.prepare('INSERT INTO customer_logins (id, phone, employee_id, method, created_at) VALUES (?, ?, ?, ?, ?)');
+    for (const c of next.customerLogins) insertLogin.run(c.id, c.phone, c.employeeId || '', c.method, c.createdAt);
+
+    const insertOrder = db.prepare('INSERT INTO payment_orders (out_trade_no, trade_no, employee_id, employee_slug, gift_id, gift_name, money, phone, pay_type, status, created_at, paid_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    for (const o of next.paymentOrders) insertOrder.run(o.outTradeNo, o.tradeNo, o.employeeId, o.employeeSlug, o.giftId, o.giftName, o.money, o.phone, o.payType, o.status, o.createdAt, o.paidAt);
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch {}
+    throw error;
+  }
 }
 
 /* ============================================================
@@ -621,6 +967,16 @@ function sendError(res, status, message) {
   sendJson(res, status, { error: message });
 }
 
+function sendText(res, status, text) {
+  res.writeHead(status, { 'content-type': 'text/plain; charset=utf-8' });
+  res.end(text);
+}
+
+function redirect(res, location) {
+  res.writeHead(302, { location });
+  res.end();
+}
+
 async function readJson(request, maxBytes = 6_000_000) {
   const chunks = [];
   let size = 0;
@@ -634,21 +990,80 @@ async function readJson(request, maxBytes = 6_000_000) {
   return JSON.parse(raw);
 }
 
+function externalBaseUrl(state, request) {
+  if (state.siteUrl) return state.siteUrl;
+  const proto = String(request.headers['x-forwarded-proto'] || '').split(',')[0].trim() || 'http';
+  const host = String(request.headers['x-forwarded-host'] || request.headers.host || '').split(',')[0].trim();
+  return host ? `${proto}://${host}` : `http://localhost:${port}`;
+}
+
+function yipaySign(params, key) {
+  const base = Object.entries(params)
+    .filter(([k, v]) => k !== 'sign' && k !== 'sign_type' && v !== undefined && v !== null && String(v) !== '')
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([k, v]) => `${k}=${v}`)
+    .join('&');
+  return crypto.createHash('md5').update(`${base}${key}`, 'utf8').digest('hex');
+}
+
+function verifyYipayParams(params, cfg) {
+  const sign = params.get('sign') || '';
+  if (!sign || !cfg.key) return false;
+  const obj = Object.fromEntries(params.entries());
+  return yipaySign(obj, cfg.key) === sign.toLowerCase();
+}
+
+function buildYipaySubmitUrl(cfg, params) {
+  const body = { ...params, sign: yipaySign(params, cfg.key), sign_type: 'MD5' };
+  const url = new URL('/submit.php', cfg.gateway);
+  for (const [k, v] of Object.entries(body)) url.searchParams.set(k, String(v));
+  return url.toString();
+}
+
+async function markOrderPaid(state, order, notifyParams = {}) {
+  const now = new Date().toISOString();
+  const tradeNo = String(notifyParams.trade_no || order.tradeNo || '').slice(0, 64);
+  const employees = state.employees.map((e) => {
+    if (e.id !== order.employeeId) return e;
+    const lit = new Set(e.litGiftIds);
+    lit.add(order.giftId);
+    return { ...e, litGiftIds: [...lit], updatedAt: now };
+  });
+  const alreadyRecorded = state.activities.some((a) => a.outTradeNo === order.outTradeNo);
+  const activity = {
+    id: makeId('act'),
+    employeeId: order.employeeId,
+    giftId: order.giftId,
+    giftName: order.giftName,
+    price: Number(order.money),
+    phone: order.phone,
+    paymentProvider: 'yipay',
+    outTradeNo: order.outTradeNo,
+    tradeNo,
+    createdAt: now
+  };
+  const paymentOrders = state.paymentOrders.map((o) => o.outTradeNo === order.outTradeNo
+    ? { ...o, status: 'paid', tradeNo, paidAt: o.paidAt || now }
+    : o);
+  const activities = alreadyRecorded ? state.activities : [activity, ...state.activities].slice(0, MAX_ACTIVITIES);
+  return writeState({ ...state, employees, activities, paymentOrders });
+}
+
 /* ============================================================
  * 视图：员工对外公开数据
  * ============================================================ */
 function publicEmployeeView(state, employee) {
   const catalog = withCatalog(state);
+  const yipay = effectiveYipayConfig(state);
   return {
     brandName: state.brandName,
     smsRequired: isSmsActuallyEnabled(state.smsConfig),
+    paymentReady: isYipayActuallyEnabled(yipay),
     employee: {
       slug: employee.slug,
       name: employee.name,
       avatarPath: employee.avatarPath,
       intro: employee.intro,
-      wechatPayUrl: employee.wechatPayUrl || state.defaultWechatPayUrl,
-      wechatQrPath: employee.wechatQrPath,
       litGiftIds: employee.litGiftIds
     },
     gifts: catalog
@@ -735,6 +1150,44 @@ async function clearImagesByPrefix(dir, baseName) {
  * ============================================================ */
 async function handleApi(request, response, pathname, query) {
   const state = await ensureStateFile();
+  const yipay = effectiveYipayConfig(state);
+
+  /* ---------- 易支付回调 ---------- */
+
+  if (request.method === 'GET' && pathname === '/api/pay/yipay/notify') {
+    if (!verifyYipayParams(query, yipay)) { sendText(response, 400, 'fail'); return; }
+    if (query.get('pid') !== yipay.pid) { sendText(response, 400, 'fail'); return; }
+    if (query.get('trade_status') !== 'TRADE_SUCCESS') { sendText(response, 200, 'success'); return; }
+    const outTradeNo = query.get('out_trade_no') || '';
+    const order = state.paymentOrders.find((o) => o.outTradeNo === outTradeNo);
+    if (!order) { sendText(response, 404, 'fail'); return; }
+    if (normalizeMoney(query.get('money')) !== order.money) { sendText(response, 400, 'fail'); return; }
+    if (order.status !== 'paid') await markOrderPaid(state, order, Object.fromEntries(query.entries()));
+    sendText(response, 200, 'success');
+    return;
+  }
+
+  if (request.method === 'GET' && pathname === '/api/pay/yipay/return') {
+    const fallbackSlug = String(query.get('param') || '').split(':')[0] || '';
+    let targetSlug = isValidSlug(fallbackSlug) ? fallbackSlug.toLowerCase() : 'admin';
+    let outcome = 'unknown';
+    if (verifyYipayParams(query, yipay) && query.get('trade_status') === 'TRADE_SUCCESS') {
+      const order = state.paymentOrders.find((o) => o.outTradeNo === (query.get('out_trade_no') || ''));
+      if (order) {
+        targetSlug = order.employeeSlug || targetSlug;
+        if (normalizeMoney(query.get('money')) === order.money) {
+          outcome = 'success';
+          if (order.status !== 'paid') await markOrderPaid(state, order, Object.fromEntries(query.entries()));
+        } else {
+          outcome = 'mismatch';
+        }
+      }
+    } else if (query.has('trade_status')) {
+      outcome = 'failed';
+    }
+    redirect(response, `/u/${targetSlug}?pay=${encodeURIComponent(outcome)}`);
+    return;
+  }
 
   /* ---------- 公开 ---------- */
 
@@ -815,12 +1268,13 @@ async function handleApi(request, response, pathname, query) {
   }
 
   /* 客户送礼 */
-  const lightMatch = pathname.match(/^\/api\/employees\/([a-z0-9-]+)\/gifts\/([a-z0-9-]+)\/light$/);
-  if (request.method === 'POST' && lightMatch) {
-    const slug = lightMatch[1].toLowerCase();
-    const giftId = lightMatch[2];
+  const payMatch = pathname.match(/^\/api\/employees\/([a-z0-9-]+)\/gifts\/([a-z0-9-]+)\/pay$/);
+  if (request.method === 'POST' && payMatch) {
+    const slug = payMatch[1].toLowerCase();
+    const giftId = payMatch[2];
     const customer = authenticateCustomer(state, request);
     if (!customer) { sendError(response, 401, '请先用手机号登录。'); return; }
+    if (!isYipayActuallyEnabled(yipay)) { sendError(response, 503, '支付暂未配置，请联系管理员。'); return; }
     const employee = state.employees.find((e) => e.slug === slug);
     if (!employee || !employee.enabled) { sendError(response, 404, '员工不存在或已下架。'); return; }
     const baseGift = gifts.find((g) => g.id === giftId);
@@ -830,29 +1284,43 @@ async function handleApi(request, response, pathname, query) {
     const amount = Number(body.amount);
     if (!Number.isFinite(amount) || amount !== gift.price) { sendError(response, 400, '金额与礼物不匹配。'); return; }
 
-    const activity = {
-      id: makeId('act'),
+    const baseUrl = externalBaseUrl(state, request);
+    const outTradeNo = `bc${Date.now().toString(36)}${crypto.randomBytes(4).toString('hex')}`;
+    const money = normalizeMoney(gift.price);
+    const order = {
+      outTradeNo,
+      tradeNo: '',
       employeeId: employee.id,
+      employeeSlug: employee.slug,
       giftId: gift.id,
       giftName: gift.name,
-      price: gift.price,
+      money,
       phone: customer.phone,
-      createdAt: new Date().toISOString()
+      payType: yipay.type,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      paidAt: ''
     };
-    const employees = state.employees.map((e) => {
-      if (e.id !== employee.id) return e;
-      const lit = new Set(e.litGiftIds);
-      lit.add(gift.id);
-      return { ...e, litGiftIds: [...lit], updatedAt: new Date().toISOString() };
-    });
-    const activities = [activity, ...state.activities].slice(0, MAX_ACTIVITIES);
-    const next = await writeState({ ...state, employees, activities });
-    const updatedEmployee = next.employees.find((e) => e.id === employee.id);
-    sendJson(response, 200, {
-      gift,
-      activity: { ...activity, phone: maskPhone(activity.phone) },
-      litGiftIds: updatedEmployee.litGiftIds
-    });
+    const paymentOrders = [order, ...state.paymentOrders];
+    await writeState({ ...state, paymentOrders });
+
+    const params = {
+      pid: yipay.pid,
+      type: yipay.type,
+      out_trade_no: outTradeNo,
+      notify_url: `${baseUrl}/api/pay/yipay/notify`,
+      return_url: `${baseUrl}/api/pay/yipay/return`,
+      name: `${gift.name}`.slice(0, 60),
+      money,
+      param: employee.slug
+    };
+    sendJson(response, 200, { outTradeNo, paymentUrl: buildYipaySubmitUrl(yipay, params) });
+    return;
+  }
+
+  const lightMatch = pathname.match(/^\/api\/employees\/([a-z0-9-]+)\/gifts\/([a-z0-9-]+)\/light$/);
+  if (request.method === 'POST' && lightMatch) {
+    sendError(response, 410, '请通过易支付完成付款后自动点亮。');
     return;
   }
 
@@ -971,6 +1439,7 @@ async function handleApi(request, response, pathname, query) {
         brandName: state.brandName,
         siteUrl: state.siteUrl,
         defaultWechatPayUrl: state.defaultWechatPayUrl,
+        yipay: publicYipayConfigView(yipay),
         catalog: withCatalog(state, true),
         employees: state.employees.map(adminEmployeeView),
         sms: publicSmsConfigView(state.smsConfig)
@@ -1001,8 +1470,35 @@ async function handleApi(request, response, pathname, query) {
       sendJson(response, 200, {
         brandName: next.brandName,
         siteUrl: next.siteUrl,
-        defaultWechatPayUrl: next.defaultWechatPayUrl
+        defaultWechatPayUrl: next.defaultWechatPayUrl,
+        yipay: publicYipayConfigView(effectiveYipayConfig(next))
       });
+      return;
+    }
+
+    /* 易支付设置 */
+    if (request.method === 'POST' && pathname === '/api/admin/yipay') {
+      const body = await readJson(request);
+      const nextGateway = typeof body.gateway === 'string' ? normalizeYipayGateway(body.gateway) : state.yipayConfig.gateway;
+      const nextPid = typeof body.pid === 'string' && body.pid.trim() && !body.pid.includes('****')
+        ? body.pid.trim().slice(0, 40) : state.yipayConfig.pid;
+      const nextType = validYipayTypes.has(body.type) ? body.type : state.yipayConfig.type;
+      const hasPendingOrders = state.paymentOrders.some((o) => o.status === 'pending');
+      const changesPaymentIdentity = nextGateway !== state.yipayConfig.gateway || nextPid !== state.yipayConfig.pid || nextType !== state.yipayConfig.type;
+      if (hasPendingOrders && changesPaymentIdentity) {
+        sendError(response, 409, '仍有待支付订单，暂不能修改易支付网关、商户 ID 或支付方式。请等待回调完成或稍后再试。');
+        return;
+      }
+      const merged = {
+        ...state.yipayConfig,
+        enabled: Boolean(body.enabled),
+        gateway: nextGateway,
+        pid: nextPid,
+        key: '',
+        type: nextType
+      };
+      const next = await writeState({ ...state, yipayConfig: normalizeYipayConfig(merged) });
+      sendJson(response, 200, { yipay: publicYipayConfigView(effectiveYipayConfig(next)) });
       return;
     }
 
