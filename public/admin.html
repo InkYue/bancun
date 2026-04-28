@@ -3,72 +3,397 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#160d0c" />
-    <title>半寸时光后台管理</title>
+    <meta name="theme-color" content="#fafbfc" />
+    <title>半寸时光 · 后台管理</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body class="page-admin">
-    <div class="ambient ambient-one"></div>
-    <div class="ambient ambient-two"></div>
+  <body class="page-admin admin-console theme-light">
+    <!-- 登录遮罩 -->
+    <div id="loginOverlay" class="login-overlay" hidden>
+      <div class="login-card" role="dialog" aria-labelledby="loginTitle">
+        <p class="eyebrow">Staff Sign-In</p>
+        <h2 id="loginTitle">半寸时光后台</h2>
+        <p class="login-tip">请用员工 / admin 账号登录</p>
+        <label class="login-field" for="loginSlug">
+          <span>账号 (slug)</span>
+          <input id="loginSlug" type="text" autocomplete="username" placeholder="如 admin / sakura" />
+        </label>
+        <label class="login-field" for="loginPassword">
+          <span>密码</span>
+          <input id="loginPassword" type="password" autocomplete="current-password" placeholder="6 位以上" />
+        </label>
+        <button id="loginButton" class="primary-button" type="button">登 录</button>
+        <p class="login-hint">默认 admin: 账号 <code>admin</code> · 密码见服务启动日志</p>
+      </div>
+    </div>
 
-    <main class="page-shell admin-page">
-      <section class="hero-card admin-hero" aria-labelledby="adminBrandName">
-        <p class="eyebrow">Admin Console</p>
-        <h1 id="adminBrandName">半寸时光</h1>
-        <p class="subtitle">后台管理</p>
-        <div class="ribbon">编辑名称 / 上下线礼物 / 上传收款码 / 一键重置</div>
-      </section>
+    <!-- 顶栏 -->
+    <header class="console-topbar">
+      <button id="sidebarToggle" class="topbar-icon-btn" type="button" aria-label="切换侧边栏"><span aria-hidden="true">☰</span></button>
+      <div class="topbar-brand">
+        <span class="brand-dot"></span>
+        <span class="brand-text">半寸时光 · Console</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <span id="topbarStatus" class="topbar-status">未连接</span>
+      <span id="topbarRole" class="topbar-role" hidden></span>
+      <button id="topbarRefresh" class="topbar-icon-btn" type="button" aria-label="刷新数据"><span aria-hidden="true">⟳</span></button>
+      <button id="logoutButton" class="topbar-icon-btn" type="button" aria-label="退出登录"><span aria-hidden="true">⎋</span></button>
+    </header>
 
-      <section class="admin-panel" aria-labelledby="adminLoginTitle">
-        <p class="eyebrow">Private Entrance</p>
-        <h2 id="adminLoginTitle">管理设置</h2>
-        <div class="admin-grid">
-          <label>
-            <span>后台口令</span>
-            <input id="adminToken" type="password" placeholder="默认 bancun-admin，可用 ADMIN_TOKEN 修改" />
-          </label>
-          <label>
-            <span>名字栏（标题）</span>
-            <input id="brandInput" maxlength="24" placeholder="半寸时光" />
-          </label>
-          <label class="wide-field">
-            <span>微信收款跳转链接（可选）</span>
-            <input id="payUrlInput" placeholder="支持 {amount} / {giftName} / {giftId} 占位符" />
-          </label>
-        </div>
-        <div class="admin-actions">
-          <button id="loadAdminButton" class="ghost-button" type="button">读取后台数据</button>
-          <button id="saveAdminButton" class="primary-button" type="button">保存名称 / 链接</button>
-          <button id="resetButton" class="danger-button" type="button">一键重置全部变暗</button>
-        </div>
-      </section>
+    <!-- 侧边栏 -->
+    <aside id="sidebar" class="console-sidebar">
+      <nav class="sidebar-nav" aria-label="后台导航">
+        <a class="sidebar-link is-active" href="#dashboard" data-view="dashboard" data-role="any">
+          <span class="sidebar-icon">▦</span><span>仪表盘</span>
+        </a>
+        <a class="sidebar-link" href="#me" data-view="me" data-role="any">
+          <span class="sidebar-icon">★</span><span>我的页面</span>
+        </a>
+        <a class="sidebar-link" href="#employees" data-view="employees" data-role="admin">
+          <span class="sidebar-icon">⌂</span><span>员工管理</span>
+        </a>
+        <a class="sidebar-link" href="#gifts" data-view="gifts" data-role="admin">
+          <span class="sidebar-icon">✦</span><span>礼物目录</span>
+        </a>
+        <a class="sidebar-link" href="#activities" data-view="activities" data-role="admin">
+          <span class="sidebar-icon">♥</span><span>送礼记录</span>
+        </a>
+        <a class="sidebar-link" href="#logins" data-view="logins" data-role="admin">
+          <span class="sidebar-icon">◎</span><span>客户登录</span>
+        </a>
+        <a class="sidebar-link" href="#settings" data-view="settings" data-role="admin">
+          <span class="sidebar-icon">⚙</span><span>站点设置</span>
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <a class="sidebar-outlink" id="myUrlLink" href="#" target="_blank" rel="noreferrer">↗ 我的访问链接</a>
+      </div>
+    </aside>
 
-      <section class="admin-panel" aria-labelledby="qrTitle">
-        <p class="eyebrow">WeChat QR</p>
-        <h2 id="qrTitle">微信收款码图片</h2>
-        <p class="admin-tip">优先级高于跳转链接：上传后游客点击礼物会先弹出收款码 + 金额。</p>
-        <div class="qr-uploader">
-          <div class="qr-preview">
-            <img id="qrPreview" alt="尚未上传" />
-            <span id="qrPlaceholder">尚未上传收款码</span>
+    <!-- 主内容 -->
+    <main class="console-main">
+
+      <!-- 仪表盘 -->
+      <section class="console-view" data-view="dashboard">
+        <header class="view-header">
+          <div>
+            <p class="eyebrow">Dashboard</p>
+            <h1 class="view-title">仪表盘</h1>
           </div>
-          <div class="qr-actions">
-            <label class="ghost-button file-button">
-              选择图片上传
-              <input id="qrInput" type="file" accept="image/png,image/jpeg,image/webp" hidden />
-            </label>
-            <button id="qrRemoveButton" class="danger-button" type="button">移除收款码</button>
-          </div>
+          <p class="view-sub" id="dashboardSub">实时查看送礼数据与点亮状态。</p>
+        </header>
+
+        <div class="kpi-grid">
+          <div class="kpi-card"><span class="kpi-label">累计收到</span><strong id="kpiTotal" class="kpi-value">¥0</strong><span id="kpiTotalTrend" class="kpi-trend">—</span></div>
+          <div class="kpi-card"><span class="kpi-label">送礼总次数</span><strong id="kpiCount" class="kpi-value">0</strong><span id="kpiCountTrend" class="kpi-trend">—</span></div>
+          <div class="kpi-card"><span class="kpi-label">今日收到</span><strong id="kpiToday" class="kpi-value">¥0</strong><span id="kpiTodayTrend" class="kpi-trend">—</span></div>
+          <div class="kpi-card" data-role="admin"><span class="kpi-label">员工启用 / 总数</span><strong id="kpiEmployees" class="kpi-value">0 / 0</strong><span id="kpiEmployeesTrend" class="kpi-trend">—</span></div>
+          <div class="kpi-card" data-role="admin"><span class="kpi-label">客户人数（去重）</span><strong id="kpiCustomers" class="kpi-value">0</strong><span id="kpiCustomersTrend" class="kpi-trend">—</span></div>
+          <div class="kpi-card" data-role="employee"><span class="kpi-label">已点亮 / 总数</span><strong id="kpiLit" class="kpi-value">0 / 0</strong><span id="kpiLitTrend" class="kpi-trend">—</span></div>
+        </div>
+
+        <div class="dashboard-row">
+          <article class="console-card">
+            <header class="card-header"><h2>礼物分布</h2><span class="card-sub">按礼物名次数排序</span></header>
+            <ul id="distChart" class="dist-chart"></ul>
+          </article>
+          <article class="console-card">
+            <header class="card-header"><h2>最近送礼</h2><a href="#activities" class="card-action" data-view="activities" data-role="admin">查看全部 →</a></header>
+            <ul id="recentList" class="recent-list"></ul>
+          </article>
         </div>
       </section>
 
-      <section class="admin-panel" aria-labelledby="giftListTitle">
-        <p class="eyebrow">Gift Catalog</p>
-        <h2 id="giftListTitle">礼物上下线</h2>
-        <p class="admin-tip">下架后游客侧将完全隐藏该礼物，已点亮记录保留。</p>
+      <!-- 我的页面 -->
+      <section class="console-view" data-view="me" hidden>
+        <header class="view-header">
+          <div>
+            <p class="eyebrow">My Page</p>
+            <h1 class="view-title">我的页面</h1>
+          </div>
+          <p class="view-sub">维护我的访问链接、收款码与个人信息。</p>
+        </header>
+
+        <article class="console-card">
+          <header class="card-header"><h2>访问链接</h2><span class="card-sub">分享给客户即可送礼</span></header>
+          <div class="copy-row">
+            <input id="myUrlInput" type="text" readonly />
+            <button id="myUrlCopy" class="ghost-button" type="button">复制</button>
+            <a id="myUrlOpen" class="ghost-button" target="_blank" rel="noreferrer">访问</a>
+          </div>
+        </article>
+
+        <article class="console-card">
+          <header class="card-header"><h2>个人资料</h2></header>
+          <div class="form-grid">
+            <label><span>显示名称</span><input id="meName" maxlength="24" /></label>
+            <label><span>访问 slug（仅 admin 可在员工管理修改）</span><input id="meSlug" readonly /></label>
+            <label class="wide-field"><span>简介（可选，最多 120 字）</span><input id="meIntro" maxlength="120" placeholder="给客户看的一句话..." /></label>
+            <label class="wide-field"><span>个人微信收款链接（可选，留空使用站点默认）</span><input id="mePayUrl" placeholder="支持 {amount} / {giftName} / {giftId}" /></label>
+          </div>
+          <div class="form-actions">
+            <button id="meSaveProfile" class="primary-button" type="button">保存资料</button>
+          </div>
+        </article>
+
+        <article class="console-card">
+          <header class="card-header"><h2>头像</h2></header>
+          <div class="qr-uploader">
+            <div class="qr-preview avatar-preview">
+              <img id="meAvatarPreview" alt="未上传" />
+              <span id="meAvatarPlaceholder">未上传头像</span>
+            </div>
+            <div class="qr-actions">
+              <label class="ghost-button file-button">选择头像<input id="meAvatarInput" type="file" accept="image/png,image/jpeg,image/webp" hidden /></label>
+            </div>
+          </div>
+        </article>
+
+        <article class="console-card">
+          <header class="card-header"><h2>我的收款码</h2><span class="card-sub">优先于站点跳转链接</span></header>
+          <div class="qr-uploader">
+            <div class="qr-preview">
+              <img id="meQrPreview" alt="未上传" />
+              <span id="meQrPlaceholder">未上传收款码</span>
+            </div>
+            <div class="qr-actions">
+              <label class="ghost-button file-button">选择图片<input id="meQrInput" type="file" accept="image/png,image/jpeg,image/webp" hidden /></label>
+              <button id="meQrRemove" class="danger-button" type="button">移除</button>
+            </div>
+          </div>
+        </article>
+
+        <article class="console-card">
+          <header class="card-header"><h2>修改密码</h2></header>
+          <div class="form-grid">
+            <label><span>旧密码</span><input id="meOldPwd" type="password" /></label>
+            <label><span>新密码（至少 6 位）</span><input id="meNewPwd" type="password" /></label>
+          </div>
+          <div class="form-actions">
+            <button id="meChangePwd" class="primary-button" type="button">更新密码</button>
+          </div>
+        </article>
+
+        <article class="console-card danger-zone">
+          <header class="card-header"><h2>页面运营</h2></header>
+          <p class="admin-tip">把我的灯牌全部熄灭，礼物图标恢复暗态。送礼记录不受影响。</p>
+          <div class="form-actions">
+            <button id="meReset" class="danger-button" type="button">一键全部熄灭</button>
+          </div>
+        </article>
+      </section>
+
+      <!-- 员工管理 -->
+      <section class="console-view" data-view="employees" hidden>
+        <header class="view-header">
+          <div>
+            <p class="eyebrow">Employees</p>
+            <h1 class="view-title">员工管理</h1>
+          </div>
+          <p class="view-sub">每个员工有独立访问 URL、密码、收款码、灯牌状态。</p>
+        </header>
+
+        <div class="toolbar">
+          <input id="empSearch" type="search" placeholder="搜索 slug / 名字" />
+          <select id="empRoleFilter">
+            <option value="all">全部角色</option>
+            <option value="admin">admin</option>
+            <option value="employee">employee</option>
+          </select>
+          <span class="toolbar-spacer"></span>
+          <button id="empCreateButton" class="primary-button" type="button">+ 新增员工</button>
+        </div>
+
+        <div id="empList" class="emp-list"></div>
+      </section>
+
+      <!-- 礼物目录 -->
+      <section class="console-view" data-view="gifts" hidden>
+        <header class="view-header">
+          <div>
+            <p class="eyebrow">Gift Catalog</p>
+            <h1 class="view-title">礼物目录</h1>
+          </div>
+          <p class="view-sub">全站共享。可上下线、改名 / 改价、替换图片。点亮 / 熄灭由"客户送礼"驱动，不在此处操作。</p>
+        </header>
+
+        <div class="toolbar">
+          <input id="giftSearch" type="search" placeholder="搜索礼物名 / ID" />
+          <select id="giftFilter">
+            <option value="all">全部分类</option>
+            <option value="普通礼物">普通礼物</option>
+            <option value="冠名礼物">冠名礼物</option>
+            <option value="特殊礼物">特殊礼物</option>
+          </select>
+        </div>
+
         <div id="giftList" class="gift-list"></div>
       </section>
+
+      <!-- 送礼记录 -->
+      <section class="console-view" data-view="activities" hidden>
+        <header class="view-header">
+          <div>
+            <p class="eyebrow">Activities</p>
+            <h1 class="view-title">送礼记录</h1>
+          </div>
+          <p class="view-sub">全站汇总；可按员工筛选。最多保留 1000 条。</p>
+        </header>
+
+        <div class="toolbar">
+          <select id="actEmpFilter">
+            <option value="">全站汇总</option>
+          </select>
+          <input id="activitySearch" type="search" placeholder="搜索礼物 / 手机号尾号 / 员工" />
+          <span class="toolbar-spacer"></span>
+          <button id="clearActivitiesButton" class="danger-button" type="button">清空当前筛选</button>
+        </div>
+
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th style="width:8.5rem">时间</th>
+                <th style="width:8rem">员工</th>
+                <th style="width:9rem">礼物</th>
+                <th style="width:5.5rem; text-align:right">金额</th>
+                <th style="width:8rem">手机号</th>
+                <th style="width:4rem"></th>
+              </tr>
+            </thead>
+            <tbody id="activityRows"></tbody>
+          </table>
+          <p id="activityEmpty" class="empty-tip" hidden>暂无送礼记录。</p>
+        </div>
+      </section>
+
+      <!-- 客户登录 -->
+      <section class="console-view" data-view="logins" hidden>
+        <header class="view-header">
+          <div>
+            <p class="eyebrow">Customer Logins</p>
+            <h1 class="view-title">客户登录记录</h1>
+          </div>
+          <p class="view-sub">每位客户每次手机号登录都会留痕。已去重的"客户人数"在仪表盘 KPI。最多保留 1000 条。</p>
+        </header>
+
+        <div class="kpi-grid">
+          <div class="kpi-card"><span class="kpi-label">总登录次数</span><strong id="loginTotalCount" class="kpi-value">0</strong><span id="loginTotalTrend" class="kpi-trend">—</span></div>
+          <div class="kpi-card"><span class="kpi-label">客户人数（去重）</span><strong id="loginUniqueCount" class="kpi-value">0</strong><span id="loginUniqueTrend" class="kpi-trend">—</span></div>
+          <div class="kpi-card"><span class="kpi-label">今日新登录</span><strong id="loginTodayCount" class="kpi-value">0</strong><span id="loginTodayTrend" class="kpi-trend">—</span></div>
+          <div class="kpi-card"><span class="kpi-label">使用 SMS 登录</span><strong id="loginSmsCount" class="kpi-value">0</strong><span id="loginSmsTrend" class="kpi-trend">—</span></div>
+        </div>
+
+        <div class="toolbar">
+          <select id="loginEmpFilter">
+            <option value="">全站汇总</option>
+          </select>
+          <input id="loginSearch" type="search" placeholder="搜索员工 / 手机号尾号" />
+          <span class="toolbar-spacer"></span>
+          <button id="clearLoginsButton" class="danger-button" type="button">清空当前筛选</button>
+        </div>
+
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th style="width:9rem">登录时间</th>
+                <th style="width:9rem">手机号</th>
+                <th style="width:8rem">入口员工</th>
+                <th style="width:6rem">方式</th>
+              </tr>
+            </thead>
+            <tbody id="loginRows"></tbody>
+          </table>
+          <p id="loginEmpty" class="empty-tip" hidden>暂无客户登录记录。</p>
+        </div>
+      </section>
+
+      <!-- 站点设置 -->
+      <section class="console-view" data-view="settings" hidden>
+        <header class="view-header">
+          <div>
+            <p class="eyebrow">Settings</p>
+            <h1 class="view-title">站点设置</h1>
+          </div>
+          <p class="view-sub">站点标题、默认收款链接、SMS 短信网关。</p>
+        </header>
+
+        <article class="console-card">
+          <header class="card-header"><h2>基础信息</h2></header>
+          <div class="form-grid">
+            <label><span>站点标题</span><input id="brandInput" maxlength="24" placeholder="半寸时光" /></label>
+            <label class="wide-field"><span>默认微信收款链接（员工未配自己时使用）</span><input id="payUrlInput" placeholder="支持 {amount} / {giftName} / {giftId}" /></label>
+          </div>
+          <div class="form-actions">
+            <button id="saveAdminButton" class="primary-button" type="button">保存</button>
+          </div>
+        </article>
+
+        <article class="console-card">
+          <header class="card-header">
+            <h2>腾讯云 SMS</h2>
+            <span id="smsStatus" class="card-sub">未配置</span>
+          </header>
+          <p class="admin-tip">配置完整且开启后，客户登录员工页面需要短信验证码；未开启时只填手机号即可。</p>
+          <label class="switch-row">
+            <input id="smsEnabled" type="checkbox" />
+            <span>启用 SMS 验证码</span>
+          </label>
+          <div class="form-grid">
+            <label><span>SecretId</span><input id="smsSecretId" placeholder="腾讯云 API SecretId" /></label>
+            <label><span>SecretKey</span><input id="smsSecretKey" type="password" placeholder="留空则不修改" /></label>
+            <label><span>SmsSdkAppId</span><input id="smsSdkAppId" placeholder="如 1400000000" /></label>
+            <label><span>Region</span><input id="smsRegion" placeholder="ap-guangzhou" /></label>
+            <label><span>SignName 短信签名</span><input id="smsSignName" placeholder="如：半寸时光" /></label>
+            <label><span>TemplateId 模板 ID</span><input id="smsTemplateId" placeholder="如 1234567" /></label>
+          </div>
+          <p class="admin-tip">模板要求两个参数：第一个 = 验证码，第二个 = 有效分钟数（5）。</p>
+          <div class="form-actions">
+            <button id="smsSaveButton" class="primary-button" type="button">保存配置</button>
+            <input id="smsTestPhone" placeholder="测试手机号" inputmode="numeric" maxlength="11" />
+            <button id="smsTestButton" class="ghost-button" type="button">发测试短信</button>
+          </div>
+        </article>
+      </section>
     </main>
+
+    <!-- 创建 / 编辑员工弹层 -->
+    <div id="empOverlay" class="overlay overlay-modal" hidden>
+      <div class="overlay-mask" data-close-emp></div>
+      <div class="overlay-card emp-card" role="dialog" aria-modal="true" aria-labelledby="empOverlayTitle">
+        <button class="overlay-close" type="button" aria-label="关闭" data-close-emp>×</button>
+        <h3 id="empOverlayTitle">新增员工</h3>
+        <div class="form-grid">
+          <label>
+            <span>访问 slug（默认随机，可修改）</span>
+            <div class="slug-input-wrap">
+              <span class="slug-prefix">/u/</span>
+              <input id="empSlug" maxlength="32" placeholder="自动生成…" autocomplete="off" />
+              <button type="button" id="empSlugRegen" class="slug-regen" title="重新生成">⟳</button>
+            </div>
+            <small class="field-helper">客户访问完整链接：<code id="empSlugPreview">/u/...</code> · 可改为 sakura、xiao-hui 等便于记忆的</small>
+          </label>
+          <label><span>显示名称</span><input id="empName" maxlength="24" /></label>
+          <label><span>角色</span>
+            <select id="empRole">
+              <option value="employee">employee（仅管理自己）</option>
+              <option value="admin">admin（管理全站）</option>
+            </select>
+          </label>
+          <label><span id="empPasswordLabel">登录密码</span><input id="empPassword" type="text" maxlength="64" placeholder="至少 6 位" /></label>
+          <label class="switch-row wide-field">
+            <input id="empEnabled" type="checkbox" checked />
+            <span>启用（关闭后游客访问会无法连接）</span>
+          </label>
+        </div>
+        <div class="overlay-actions">
+          <button id="empCancel" class="ghost-button" type="button" data-close-emp>取消</button>
+          <button id="empSave" class="primary-button" type="button">保存</button>
+        </div>
+      </div>
+    </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script type="module" src="/admin.js"></script>

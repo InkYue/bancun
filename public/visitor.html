@@ -7,7 +7,7 @@
     <meta name="format-detection" content="telephone=no, email=no, address=no" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <title>半寸时光甜蜜礼物单</title>
+    <title>甜蜜礼物单</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body class="page-visitor">
@@ -15,16 +15,18 @@
       <span aria-hidden="true">🔇</span>
     </button>
 
-    <div class="ambient ambient-one"></div>
-    <div class="ambient ambient-two"></div>
-
-    <main class="page-shell">
+    <main class="page-shell" id="pageShell" hidden>
       <section class="hero-card" aria-labelledby="brandName">
         <div class="hero-orbit" aria-hidden="true"><span></span><span></span><span></span></div>
-        <p class="eyebrow">Sweet Gift Ceremony</p>
+        <div class="hero-avatar" id="heroAvatar" hidden>
+          <img id="heroAvatarImg" alt="" />
+        </div>
+        <p class="eyebrow" id="brandLabel">Sweet Gift Ceremony</p>
         <h1 id="brandName">半寸时光</h1>
-        <p class="subtitle">甜蜜礼物单</p>
+        <p class="subtitle" id="employeeName">主页</p>
+        <p class="hero-intro" id="heroIntro" hidden></p>
         <div class="ribbon">* 最终解释权归半寸时光所有 *</div>
+        <button id="customerLogout" class="customer-logout" type="button" aria-label="退出登录">⎋ 退出</button>
       </section>
 
       <section class="gift-board" aria-labelledby="giftBoardTitle">
@@ -33,9 +35,7 @@
           <h2 id="giftBoardTitle">普通礼物</h2>
           <span class="butterfly">✦</span>
         </div>
-
         <div id="normalGiftGrid" class="gift-grid"></div>
-
         <div id="premiumGiftGrid" class="gift-grid gift-grid-boxed"></div>
         <p class="crown-note">赠送以上 4 项任一礼物，即可获得专属冠名卡一张</p>
 
@@ -60,7 +60,34 @@
       </section>
     </main>
 
-    <!-- 微信支付弹层（收款码） -->
+    <!-- 手机号登录遮罩 -->
+    <div id="loginGate" class="login-gate" hidden>
+      <div class="login-gate-card" role="dialog" aria-labelledby="gateTitle">
+        <p class="eyebrow">Visitor Sign-In</p>
+        <h2 id="gateTitle">用手机号进入</h2>
+        <p class="login-tip" id="gateTip">请输入您的中国大陆手机号</p>
+
+        <label class="login-field" for="phoneInput">
+          <span>手机号</span>
+          <input id="phoneInput" type="tel" inputmode="numeric" maxlength="11" autocomplete="tel-national" placeholder="13800138000" />
+          <em id="phoneError" class="field-error" hidden></em>
+        </label>
+
+        <label class="login-field" id="codeFieldWrap" hidden>
+          <span>短信验证码</span>
+          <div class="code-field">
+            <input id="codeInput" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="6 位数字" />
+            <button id="sendCodeButton" class="ghost-button" type="button">获取验证码</button>
+          </div>
+          <em id="codeError" class="field-error" hidden></em>
+        </label>
+
+        <button id="loginButton" class="primary-button" type="button">进入</button>
+        <p class="login-hint" id="gateHint">您的手机号将作为送礼记录的身份标识</p>
+      </div>
+    </div>
+
+    <!-- 微信支付弹层 -->
     <div id="payOverlay" class="overlay" hidden>
       <div class="overlay-mask" data-close-overlay></div>
       <div class="overlay-card" role="dialog" aria-modal="true" aria-labelledby="overlayTitle">
@@ -79,6 +106,6 @@
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="/visitor.js"></script>
   </body>
 </html>

@@ -6,9 +6,12 @@ dist/
 coverage/
 
 # 运行时数据
-data/state.json
-# 后台上传的自定义图片 / 收款码
+data/
+# 后台上传的自定义图片 / 收款码 / 员工头像
 public/assets/gifts/custom-*
 public/assets/wechat-qr.*
+public/assets/employees/
 # git bundle 中转文件
 *.bundle
+# Claude Code worktree 内部目录（worktree 自身不入仓）
+.claude/
