@@ -2,12 +2,12 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#160d0c" />
     <title>半寸时光后台管理</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body>
+  <body class="page-admin">
     <div class="ambient ambient-one"></div>
     <div class="ambient ambient-two"></div>
 
@@ -16,30 +16,57 @@
         <p class="eyebrow">Admin Console</p>
         <h1 id="adminBrandName">半寸时光</h1>
         <p class="subtitle">后台管理</p>
-        <div class="ribbon">编辑名称栏 / 重置礼物点亮状态</div>
+        <div class="ribbon">编辑名称 / 上下线礼物 / 上传收款码 / 一键重置</div>
       </section>
 
-      <section class="admin-panel" aria-labelledby="adminTitle">
+      <section class="admin-panel" aria-labelledby="adminLoginTitle">
         <p class="eyebrow">Private Entrance</p>
-        <h2 id="adminTitle">管理设置</h2>
+        <h2 id="adminLoginTitle">管理设置</h2>
         <div class="admin-grid">
           <label>
             <span>后台口令</span>
             <input id="adminToken" type="password" placeholder="默认 bancun-admin，可用 ADMIN_TOKEN 修改" />
           </label>
           <label>
-            <span>名字栏</span>
+            <span>名字栏（标题）</span>
             <input id="brandInput" maxlength="24" placeholder="半寸时光" />
           </label>
           <label class="wide-field">
-            <span>微信收款跳转地址</span>
+            <span>微信收款跳转链接（可选）</span>
             <input id="payUrlInput" placeholder="支持 {amount} / {giftName} / {giftId} 占位符" />
           </label>
         </div>
         <div class="admin-actions">
-          <button id="saveAdminButton" class="primary-button" type="button">保存后台设置</button>
+          <button id="loadAdminButton" class="ghost-button" type="button">读取后台数据</button>
+          <button id="saveAdminButton" class="primary-button" type="button">保存名称 / 链接</button>
           <button id="resetButton" class="danger-button" type="button">一键重置全部变暗</button>
         </div>
+      </section>
+
+      <section class="admin-panel" aria-labelledby="qrTitle">
+        <p class="eyebrow">WeChat QR</p>
+        <h2 id="qrTitle">微信收款码图片</h2>
+        <p class="admin-tip">优先级高于跳转链接：上传后游客点击礼物会先弹出收款码 + 金额。</p>
+        <div class="qr-uploader">
+          <div class="qr-preview">
+            <img id="qrPreview" alt="尚未上传" />
+            <span id="qrPlaceholder">尚未上传收款码</span>
+          </div>
+          <div class="qr-actions">
+            <label class="ghost-button file-button">
+              选择图片上传
+              <input id="qrInput" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+            </label>
+            <button id="qrRemoveButton" class="danger-button" type="button">移除收款码</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="admin-panel" aria-labelledby="giftListTitle">
+        <p class="eyebrow">Gift Catalog</p>
+        <h2 id="giftListTitle">礼物上下线</h2>
+        <p class="admin-tip">下架后游客侧将完全隐藏该礼物，已点亮记录保留。</p>
+        <div id="giftList" class="gift-list"></div>
       </section>
     </main>
 

@@ -2,12 +2,15 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
     <meta name="theme-color" content="#160d0c" />
+    <meta name="format-detection" content="telephone=no, email=no, address=no" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>半寸时光甜蜜礼物单</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body>
+  <body class="page-visitor">
     <button id="musicToggle" class="volume-button" type="button" aria-label="开启背景音乐" aria-pressed="false">
       <span aria-hidden="true">🔇</span>
     </button>
@@ -17,28 +20,11 @@
 
     <main class="page-shell">
       <section class="hero-card" aria-labelledby="brandName">
-        <div class="hero-orbit" aria-hidden="true">
-          <span></span>
-          <span></span>
-          <span></span>
-        </div>
+        <div class="hero-orbit" aria-hidden="true"><span></span><span></span><span></span></div>
         <p class="eyebrow">Sweet Gift Ceremony</p>
         <h1 id="brandName">半寸时光</h1>
         <p class="subtitle">甜蜜礼物单</p>
         <div class="ribbon">* 最终解释权归半寸时光所有 *</div>
-      </section>
-
-      <section class="payment-panel" aria-labelledby="paymentTitle">
-        <div>
-          <p class="eyebrow">游客送礼</p>
-          <h2 id="paymentTitle">输入金额，跳转微信收款</h2>
-        </div>
-        <label class="amount-field" for="amountInput">
-          <span>礼物金额</span>
-          <input id="amountInput" inputmode="numeric" autocomplete="off" placeholder="例如 520" />
-        </label>
-        <p id="matchHint" class="match-hint">输入金额后会自动匹配对应礼物。</p>
-        <button id="payButton" class="primary-button" type="button">去微信支付并点亮</button>
       </section>
 
       <section class="gift-board" aria-labelledby="giftBoardTitle">
@@ -47,7 +33,10 @@
           <h2 id="giftBoardTitle">普通礼物</h2>
           <span class="butterfly">✦</span>
         </div>
+
         <div id="normalGiftGrid" class="gift-grid"></div>
+
+        <div id="premiumGiftGrid" class="gift-grid gift-grid-boxed"></div>
         <p class="crown-note">赠送以上 4 项任一礼物，即可获得专属冠名卡一张</p>
 
         <div class="section-title special-title">
@@ -55,10 +44,39 @@
           <h2>特殊礼物</h2>
           <span class="butterfly">✦</span>
         </div>
-        <div id="specialGiftGrid" class="gift-grid gift-grid-special"></div>
+        <div id="specialGiftGrid" class="gift-grid gift-grid-boxed"></div>
         <p class="crown-note">赠送以上 4 项任一礼物，即可获得动态专属冠名卡一张</p>
       </section>
+
+      <section class="payment-panel" aria-labelledby="paymentTitle">
+        <p class="eyebrow">游客送礼</p>
+        <h2 id="paymentTitle">输入金额，跳转微信收款</h2>
+        <label class="amount-field" for="amountInput">
+          <span>礼物金额（元）</span>
+          <input id="amountInput" inputmode="numeric" autocomplete="off" placeholder="例如 520" />
+        </label>
+        <p id="matchHint" class="match-hint">输入金额后会自动匹配对应礼物，也可直接点上方礼物。</p>
+        <button id="payButton" class="primary-button" type="button">去微信支付并点亮</button>
+      </section>
     </main>
+
+    <!-- 微信支付弹层（收款码） -->
+    <div id="payOverlay" class="overlay" hidden>
+      <div class="overlay-mask" data-close-overlay></div>
+      <div class="overlay-card" role="dialog" aria-modal="true" aria-labelledby="overlayTitle">
+        <button class="overlay-close" type="button" aria-label="关闭" data-close-overlay>×</button>
+        <p class="eyebrow">微信扫码支付</p>
+        <h3 id="overlayTitle">— 礼物名 · ¥0 —</h3>
+        <div class="qr-frame">
+          <img id="overlayQr" alt="微信收款码" />
+        </div>
+        <p class="overlay-hint">长按二维码 → 用微信扫码 → 输入金额支付</p>
+        <div class="overlay-actions">
+          <button id="overlayCancel" type="button" class="ghost-button" data-close-overlay>取消</button>
+          <button id="overlayPaid" type="button" class="primary-button">我已完成支付</button>
+        </div>
+      </div>
+    </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script type="module" src="/app.js"></script>

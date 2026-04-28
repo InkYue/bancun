@@ -4,3 +4,11 @@ node_modules/
 *.log
 dist/
 coverage/
+
+# 运行时数据
+data/state.json
+# 后台上传的自定义图片 / 收款码
+public/assets/gifts/custom-*
+public/assets/wechat-qr.*
+# git bundle 中转文件
+*.bundle
