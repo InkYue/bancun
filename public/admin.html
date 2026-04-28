@@ -150,19 +150,9 @@
           </div>
         </article>
 
-        <article class="console-card">
-          <header class="card-header"><h2>我的收款码</h2><span class="card-sub">优先于站点跳转链接</span></header>
-          <div class="qr-uploader">
-            <div class="qr-preview">
-              <img id="meQrPreview" alt="未上传" />
-              <span id="meQrPlaceholder">未上传收款码</span>
-            </div>
-            <div class="qr-actions">
-              <label class="ghost-button file-button">选择图片<input id="meQrInput" type="file" accept="image/png,image/jpeg,image/webp" hidden /></label>
-              <button id="meQrRemove" class="danger-button" type="button">移除</button>
-            </div>
-          </div>
-        </article>
+        <p class="admin-tip" style="text-align:center; margin: 0.6rem 0 1rem;">
+          收款码图片由 admin 通过 <strong>员工管理 → 收款码</strong> 代为维护；员工无权直接上传 / 修改。
+        </p>
 
         <article class="console-card">
           <header class="card-header"><h2>修改密码</h2></header>
@@ -324,6 +314,11 @@
           <header class="card-header"><h2>基础信息</h2></header>
           <div class="form-grid">
             <label><span>站点标题</span><input id="brandInput" maxlength="24" placeholder="半寸时光" /></label>
+            <label>
+              <span>对外访问域名（用于"复制链接"）</span>
+              <input id="siteUrlInput" placeholder="https://your-domain.com（留空则用浏览器当前地址）" />
+              <small class="field-helper">设置后，所有"复制链接"会变成 <code id="siteUrlPreview">/u/...</code>，避免把 localhost / 内网 IP 发给客户。</small>
+            </label>
             <label class="wide-field"><span>默认微信收款链接（员工未配自己时使用）</span><input id="payUrlInput" placeholder="支持 {amount} / {giftName} / {giftId}" /></label>
           </div>
           <div class="form-actions">

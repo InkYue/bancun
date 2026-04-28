@@ -67,10 +67,6 @@ const meSaveProfile = $('#meSaveProfile');
 const meAvatarPreview = $('#meAvatarPreview');
 const meAvatarPlaceholder = $('#meAvatarPlaceholder');
 const meAvatarInput = $('#meAvatarInput');
-const meQrPreview = $('#meQrPreview');
-const meQrPlaceholder = $('#meQrPlaceholder');
-const meQrInput = $('#meQrInput');
-const meQrRemove = $('#meQrRemove');
 const meOldPwd = $('#meOldPwd');
 const meNewPwd = $('#meNewPwd');
 const meChangePwd = $('#meChangePwd');
@@ -96,6 +92,8 @@ const clearActivitiesButton = $('#clearActivitiesButton');
 
 /* settings */
 const brandInput = $('#brandInput');
+const siteUrlInput = $('#siteUrlInput');
+const siteUrlPreview = $('#siteUrlPreview');
 const payUrlInput = $('#payUrlInput');
 const saveAdminButton = $('#saveAdminButton');
 const smsStatus = $('#smsStatus');
@@ -184,6 +182,16 @@ function getToken() { try { return localStorage.getItem(TOKEN_KEY) || ''; } catc
 function setToken(t) { try { localStorage.setItem(TOKEN_KEY, t); } catch {} }
 function clearToken() { try { localStorage.removeItem(TOKEN_KEY); } catch {} }
 function authHeaders(extra = {}) { return { 'x-auth-token': getToken(), ...extra }; }
+
+/* ---------- 公网链接构造 ---------- */
+function publicBaseUrl() {
+  const configured = (adminState?.siteUrl || '').replace(/\/+$/, '');
+  if (configured) return configured;
+  return location.origin;
+}
+function publicEmployeeUrl(slugStr) {
+  return `${publicBaseUrl()}/u/${slugStr}`;
+}
 
 /* ---------- toast ---------- */
 function showToast(msg, kind = 'info') {
@@ -363,7 +371,7 @@ function render() {
 
 function renderTopbar() {
   if (!me) return;
-  myUrlLink.href = `/u/${me.slug}`;
+  myUrlLink.href = publicEmployeeUrl(me.slug);
   myUrlLink.textContent = `↗ /u/${me.slug}`;
 }
 
@@ -446,7 +454,7 @@ function renderDashboard() {
 /* ---------- 我的页面 ---------- */
 function renderMe() {
   if (!me) return;
-  const url = `${location.origin}/u/${me.slug}`;
+  const url = publicEmployeeUrl(me.slug);
   myUrlInput.value = url;
   myUrlOpen.href = url;
   meName.value = me.name || '';
@@ -462,16 +470,6 @@ function renderMe() {
     meAvatarPreview.removeAttribute('src');
     meAvatarPreview.parentElement.classList.remove('is-loaded');
     meAvatarPlaceholder.hidden = false;
-  }
-  /* 收款码 */
-  if (me.wechatQrPath) {
-    meQrPreview.src = me.wechatQrPath;
-    meQrPreview.parentElement.classList.add('is-loaded');
-    meQrPlaceholder.hidden = true;
-  } else {
-    meQrPreview.removeAttribute('src');
-    meQrPreview.parentElement.classList.remove('is-loaded');
-    meQrPlaceholder.hidden = false;
   }
 }
 
@@ -498,20 +496,6 @@ meSaveProfile.addEventListener('click', async () => {
 });
 
 meAvatarInput.addEventListener('change', (e) => uploadImage(e, '/api/me/avatar', '头像已更新', (data) => { me = { ...me, ...data.employee }; }));
-meQrInput.addEventListener('change', (e) => uploadImage(e, '/api/me/wechat-qr', '收款码已更新', (data) => { me = { ...me, ...data.employee }; }));
-
-meQrRemove.addEventListener('click', async () => {
-  if (!me.wechatQrPath) return;
-  if (!confirm('确认移除收款码？')) return;
-  try {
-    const r = await fetch('/api/me/wechat-qr', { method: 'DELETE', headers: authHeaders() });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || '移除失败');
-    const data = await r.json();
-    me = { ...me, ...data.employee };
-    render();
-    showToast('收款码已移除');
-  } catch (e) { showToast(e.message, 'error'); }
-});
 
 meChangePwd.addEventListener('click', async () => {
   const oldPassword = meOldPwd.value;
@@ -587,7 +571,7 @@ function renderEmployees() {
       </div>
       <div class="emp-row-ops">
         <button class="ghost-button" data-act="copy" title="复制链接发给员工 / 客户">📋 复制链接</button>
-        <a class="ghost-button icon-button" href="/u/${escapeAttr(e.slug)}" target="_blank" rel="noreferrer" title="新标签页预览">↗</a>
+        <a class="ghost-button icon-button" href="${escapeAttr(publicEmployeeUrl(e.slug))}" target="_blank" rel="noreferrer" title="新标签页预览">↗</a>
         <button class="ghost-button" data-act="qr">收款码</button>
         <button class="ghost-button" data-act="reset">熄灭</button>
         <button class="ghost-button" data-act="edit">编辑</button>
@@ -665,7 +649,7 @@ async function resetEmployeeLit(e) {
 }
 
 async function copyEmployeeUrl(e) {
-  const url = `${location.origin}/u/${e.slug}`;
+  const url = publicEmployeeUrl(e.slug);
   try {
     await navigator.clipboard.writeText(url);
     showToast(`已复制：${url}`);
@@ -973,6 +957,8 @@ function renderLogins() {
 function renderSettings() {
   if (!adminState) return;
   brandInput.value = adminState.brandName || '';
+  siteUrlInput.value = adminState.siteUrl || '';
+  updateSiteUrlPreview();
   payUrlInput.value = adminState.defaultWechatPayUrl || '';
   const sms = adminState.sms || {};
   smsEnabled.checked = !!sms.enabled;
@@ -995,16 +981,30 @@ function renderSettings() {
   }
 }
 
+function updateSiteUrlPreview() {
+  const v = siteUrlInput.value.trim().replace(/\/+$/, '');
+  const sample = me?.slug || 'sakura';
+  siteUrlPreview.textContent = `${v || location.origin}/u/${sample}`;
+}
+siteUrlInput.addEventListener('input', updateSiteUrlPreview);
+
 saveAdminButton.addEventListener('click', async () => {
   try {
     const r = await fetch('/api/admin/settings', {
       method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }),
-      body: JSON.stringify({ brandName: brandInput.value, defaultWechatPayUrl: payUrlInput.value })
+      body: JSON.stringify({
+        brandName: brandInput.value,
+        siteUrl: siteUrlInput.value,
+        defaultWechatPayUrl: payUrlInput.value
+      })
     });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || '保存失败');
     const data = await r.json();
     adminState.brandName = data.brandName;
+    adminState.siteUrl = data.siteUrl;
     adminState.defaultWechatPayUrl = data.defaultWechatPayUrl;
+    /* siteUrl 影响所有视图的链接，整体重渲 */
+    render();
     showToast('已保存');
   } catch (e) { showToast(e.message, 'error'); }
 });

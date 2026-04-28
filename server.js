@@ -96,6 +96,18 @@ function normalizeText(value, fallback, maxLength) {
   return trimmed.slice(0, maxLength);
 }
 
+/* 对外访问域名：必须是 http(s):// 开头的合法 URL，去掉尾部斜杠；空则不配置 */
+function normalizeSiteUrl(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (!/^https?:\/\//i.test(trimmed)) return '';
+  try {
+    const u = new URL(trimmed);
+    return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, '')}`.slice(0, 200);
+  } catch { return ''; }
+}
+
 function isValidSlug(value) {
   return typeof value === 'string' && /^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/i.test(value);
 }
@@ -128,6 +140,7 @@ function defaultState() {
   return {
     schemaVersion: 2,
     brandName: '半寸时光',
+    siteUrl: '',
     defaultWechatPayUrl,
     disabledGiftIds: [],
     giftOverrides: {},
@@ -287,6 +300,7 @@ function normalizeState(value) {
   return {
     schemaVersion: 2,
     brandName: normalizeText(value.brandName, fb.brandName, 24),
+    siteUrl: normalizeSiteUrl(value.siteUrl),
     defaultWechatPayUrl: normalizeText(value.defaultWechatPayUrl, fb.defaultWechatPayUrl, 600),
     disabledGiftIds: Array.isArray(value.disabledGiftIds)
       ? [...new Set(value.disabledGiftIds.filter((x) => giftIds.has(x)))]
@@ -918,24 +932,9 @@ async function handleApi(request, response, pathname, query) {
       return;
     }
 
-    if (request.method === 'POST' && pathname === '/api/me/wechat-qr') {
-      const body = await readJson(request);
-      try {
-        const dir = path.join(employeeAssetsDir, me.id);
-        const { fileName } = await saveDataUrlImage(body.dataUrl, dir, 'wechat-qr', false);
-        const wechatQrPath = `/assets/employees/${me.id}/${fileName}?v=${Date.now()}`;
-        const employees = state.employees.map((e) => e.id === me.id ? { ...e, wechatQrPath, updatedAt: new Date().toISOString() } : e);
-        const next = await writeState({ ...state, employees });
-        sendJson(response, 200, { employee: selfEmployeeView(next, next.employees.find((e) => e.id === me.id)) });
-      } catch (err) { sendError(response, 400, err.message); }
-      return;
-    }
-
-    if (request.method === 'DELETE' && pathname === '/api/me/wechat-qr') {
-      await clearImagesByPrefix(path.join(employeeAssetsDir, me.id), 'wechat-qr');
-      const employees = state.employees.map((e) => e.id === me.id ? { ...e, wechatQrPath: '', updatedAt: new Date().toISOString() } : e);
-      const next = await writeState({ ...state, employees });
-      sendJson(response, 200, { employee: selfEmployeeView(next, next.employees.find((e) => e.id === me.id)) });
+    /* 收款码：员工无权自助管理，统一走 /api/admin/employees/:id/wechat-qr */
+    if (pathname === '/api/me/wechat-qr') {
+      sendError(response, 403, '收款码由 admin 在员工管理处统一维护。');
       return;
     }
 
@@ -970,6 +969,7 @@ async function handleApi(request, response, pathname, query) {
     if (request.method === 'GET' && pathname === '/api/admin/state') {
       sendJson(response, 200, {
         brandName: state.brandName,
+        siteUrl: state.siteUrl,
         defaultWechatPayUrl: state.defaultWechatPayUrl,
         catalog: withCatalog(state, true),
         employees: state.employees.map(adminEmployeeView),
@@ -981,12 +981,28 @@ async function handleApi(request, response, pathname, query) {
     /* 站点设置 */
     if (request.method === 'POST' && pathname === '/api/admin/settings') {
       const body = await readJson(request);
+      /* siteUrl: 用户传空字符串就清空，传非法值返回 400 */
+      let nextSiteUrl = state.siteUrl;
+      if (typeof body.siteUrl === 'string') {
+        const trimmed = body.siteUrl.trim();
+        if (!trimmed) nextSiteUrl = '';
+        else {
+          const norm = normalizeSiteUrl(trimmed);
+          if (!norm) { sendError(response, 400, '对外访问域名必须是 http(s):// 开头的合法 URL。'); return; }
+          nextSiteUrl = norm;
+        }
+      }
       const next = await writeState({
         ...state,
         brandName: normalizeText(body.brandName, state.brandName, 24),
+        siteUrl: nextSiteUrl,
         defaultWechatPayUrl: normalizeText(body.defaultWechatPayUrl, state.defaultWechatPayUrl, 600)
       });
-      sendJson(response, 200, { brandName: next.brandName, defaultWechatPayUrl: next.defaultWechatPayUrl });
+      sendJson(response, 200, {
+        brandName: next.brandName,
+        siteUrl: next.siteUrl,
+        defaultWechatPayUrl: next.defaultWechatPayUrl
+      });
       return;
     }
 

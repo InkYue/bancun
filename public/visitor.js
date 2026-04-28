@@ -8,8 +8,10 @@ if (!slug) {
   window.location.replace('/');
 }
 
-const TOKEN_KEY = 'bancun-customer-token';
-const PHONE_KEY = 'bancun-customer-phone';
+/* token 按 slug 隔离：访问新员工链接时强制重新登录 */
+const TOKEN_KEY = `bancun-customer-token:${slug}`;
+/* 手机号在全站共享一份做"上次输入"预填，省得每次重打 */
+const PHONE_KEY = 'bancun-customer-last-phone';
 
 /* DOM */
 const pageShell = $('#pageShell');
