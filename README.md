@@ -8,15 +8,15 @@
 - **角色**：`admin`（管理全站）、`employee`（仅管理自己），admin 至少保留 1 名
 - **配色**：游客侧暖色系深色甜蜜风（中式氛围图 + 月亮装饰 + 礼物金粉光晕）、后台白色管理风，互不影响
 - **响应式**：H5 移动端 + PC，安全区适配（iPhone notch / 底部 home indicator）
-- **零依赖**：纯 Node 内置库（`http` / `https` / `crypto`），腾讯云 SMS 走原生 TC3-HMAC-SHA256 签名 HTTPS
+- **零依赖**：纯 Node 内置库（`http` / `https` / `crypto` / `sqlite`），腾讯云 SMS、易支付签名与回调验签都走原生实现
 
-> ⚠️ 当前的"我已完成支付"是**荣誉制点亮**，不是真实到账确认。详见下方 [支付确认现状](#支付确认现状)。
+> 支付已接入易支付：客户付款后必须收到易支付异步通知且验签成功，系统才会点亮礼物。
 
 ---
 
 ## 快速开始
 
-需要 Node 20+，零依赖（内置 `http` / `https` / `crypto`）。
+需要 Node 22.5+，零依赖（内置 `http` / `https` / `crypto` / `sqlite`）。
 
 ```bash
 # 启动开发
@@ -24,10 +24,14 @@ npm run dev
 # 或
 node server.js
 
-# 自定义端口 / 默认 admin 密码 / 默认收款链接
-PORT=8080 ADMIN_PASSWORD="my-strong-password" \
-WECHAT_PAY_URL="weixin://wxpay/bizpayurl?pr=xxx&amount={amount}" \
-node server.js
+# 自定义端口 / 默认 admin 密码
+PORT=8080 ADMIN_PASSWORD="my-strong-password" node server.js
+
+# 自定义数据目录（默认 ./data）
+DATA_DIR="/var/lib/bancun" node server.js
+
+# 启用易支付时，商户 KEY 从环境变量读取，不写入数据库
+YIPAY_KEY="your-yipay-merchant-key" node server.js
 ```
 
 启动日志会打印默认 admin 账号：
@@ -58,11 +62,12 @@ node server.js
 | 角色 | 可见视图 | 能做什么 |
 |------|---------|----------|
 | `admin` | 仪表盘、我的页面、员工管理、礼物目录、送礼记录、站点设置 | 管全站；维护自己 |
-| `employee` | 仪表盘、我的页面 | 只能管自己（链接、收款码、密码、灯牌全熄） |
+| `employee` | 仪表盘、我的页面 | 只能管自己（链接、密码、灯牌全熄） |
 
 **点亮 / 熄灭逻辑**：
 
-- 灯牌的"点亮"由**客户送礼**触发（`POST /api/employees/:slug/gifts/:id/light`）
+- 灯牌的"点亮"由**易支付成功回调**触发（客户先 `POST /api/employees/:slug/gifts/:id/pay` 创建订单）
+- 旧的直接点亮接口 `POST /api/employees/:slug/gifts/:id/light` 已关闭，避免未付款也能点亮
 - 后台**不提供**手动点亮单个礼物的开关（与员工和客户挂钩，不归运营）
 - 员工 / admin 可以**一键全部熄灭**自己 / 指定员工的灯牌（运营复位用）
 
@@ -85,28 +90,40 @@ node server.js
 | 视图 | 内容 | 角色 |
 |------|------|------|
 | 仪表盘 | 累计金额 / 总送礼次数 / 今日 / **客户人数（去重）** / 员工启用比 / 礼物分布柱状图 / 最近送礼 | 全部 |
-| 我的页面 | 个人访问链接 + 复制 / 头像 / 收款码 / 个人资料 / 修改密码 / 一键全部熄灭 | 全部 |
-| 员工管理 | 列表 + 搜索 + 角色筛选 + 新增 / 编辑（含 slug 自动生成）/ 上下线 / 代上传 QR / 代熄灭 / 删除 / **复制链接** | admin |
+| 我的页面 | 个人访问链接 + 复制 / 头像 / 个人资料 / 修改密码 / 一键全部熄灭 | 全部 |
+| 员工管理 | 列表 + 搜索 + 角色筛选 + 新增 / 编辑（含 slug 自动生成）/ 上下线 / 代熄灭 / 删除 / **复制链接** | admin |
 | 礼物目录 | 16 个礼物的上下线 / 编辑名称价格 / 替换图 / 恢复默认 | admin |
 | 送礼记录 | 完整流水表格 + 员工筛选下拉（含全站汇总）+ 关键字搜索 + 单条删除 + 按筛选清空 | admin |
 | 客户登录 | 每次客户手机号登录的留痕 + 4 张 KPI（总登录数 / 客户去重数 / 今日新登录 / SMS 登录占比） | admin |
-| 站点设置 | 站点名 / 默认收款链接 / 腾讯云 SMS 配置（含发测试短信）/ 危险区一键全站熄灭 | admin |
+| 站点设置 | 站点名 / 对外访问域名 / 易支付配置 / 腾讯云 SMS 配置（含发测试短信） | admin |
 
 ---
 
-## 支付确认现状
+## 易支付收款流程
 
-> **重要：当前是荣誉制点亮，不是真实到账确认。**
+后台 → 站点设置 → 易支付。需要填：
 
-| 当前能做 | 当前做不到 |
-|---------|----------|
-| 上传**收款码图片**（弹层显示二维码 + 金额） | 不知道客户付了没、付了多少、是否真到账 |
-| 配 `weixin://wxpay/bizpayurl?pr=...` 跳转链接 | 没有微信回调、订单绑定、自动验签 |
-| 客户点"我已完成支付" → 写一条流水 + 点亮 | 防止"没付钱也点亮"（理论可作弊） |
+| 字段 | 说明 |
+|------|------|
+| 启用开关 | 开启后客户才能创建支付订单 |
+| 网关地址 | 默认 `https://ezfp.cn` |
+| 商户 ID（pid） | 易支付商户后台提供 |
+| 商户密钥 KEY | 通过服务端环境变量 `YIPAY_KEY` 或 `EASYPAY_KEY` 配置，不在后台表单和数据库保存 |
+| 默认支付方式 | `wxpay` / `alipay` / `qqpay` / `bank` |
+| 对外访问域名 | 用于生成 `notify_url` 和 `return_url`，生产必须是公网可访问 HTTPS 域名 |
 
-**要做到自动确认到账**，必须接微信支付商户号（mch_id）+ APIv3 + Native 下单 + 回调验签。详细实施计划见 [TODO.md](TODO.md) 的 P1 一节"接入真实微信支付"。
+客户流程：
 
-**过渡方案（无须商户号）**：把"我已完成支付"按钮改成"上传支付截图"，admin 在后台核单后再点亮。约 1-2 天可落。
+1. 客户登录 `/u/<slug>`。
+2. 选择礼物或输入金额，前端请求 `POST /api/employees/:slug/gifts/:id/pay`。
+3. 服务端生成商户订单号 `out_trade_no`，按易支付文档 ASCII 参数排序 + MD5 签名，返回 `https://ezfp.cn/submit.php?...`。
+4. 客户跳转易支付付款。
+5. 易支付 GET 回调 `/api/pay/yipay/notify`；服务端校验 `sign`、`pid`、`money`、`trade_status=TRADE_SUCCESS`。
+6. 验签成功后写入送礼记录、点亮礼物，并返回纯文本 `success`。
+
+同步跳转 `/api/pay/yipay/return` 也会尝试验签和补点亮，但真实到账以异步通知为准；失败 / 金额不匹配 / 未知状态会回到员工页并显示不同提示。
+
+有待支付订单时，后台会暂时禁止修改易支付网关、商户 ID 或支付方式，避免客户付款后回调无法验签；pending 订单不会被历史订单裁剪掉。
 
 ---
 
@@ -133,18 +150,20 @@ node server.js
 
 ## 状态文件
 
-所有数据存在 `data/state.json`，启动时自动创建。包含：
+所有业务数据默认存在 `data/state.sqlite`，启动时自动创建；也可以用 `DATA_DIR=/path/to/dir` 指定数据目录。SQLite 中保存：
 
 - `brandName` 站点名
-- `defaultWechatPayUrl` 默认收款链接（员工没填自己的就用这个）
+- `defaultWechatPayUrl` 旧版默认微信收款链接（保留兼容，当前访客支付不再使用）
 - `disabledGiftIds` / `giftOverrides` 礼物目录改动
-- `smsConfig` SMS 网关配置（包含 SecretKey 明文，**生产请确保该文件权限**）
-- `employees[]` 员工（id / slug / passwordHash / role / 自己的灯牌 / QR / 头像）
-- `activities[]` 送礼记录（最多 1000 条，FIFO；带 employeeId / phone）
-- `customerLogins[]` 客户登录留痕（最多 1000 条，FIFO；带 phone / employeeId / method）
+- `smsConfig` SMS 网关配置（包含腾讯云 SecretKey 明文，**生产请确保数据库文件权限**）
+- `yipayConfig` 易支付配置（不包含商户 KEY；KEY 从 `YIPAY_KEY` / `EASYPAY_KEY` 环境变量读取）
+- `employees` 员工（id / slug / passwordHash / role / 自己的灯牌 / 头像）
+- `activities` 送礼记录（最多 1000 条，FIFO；带 employeeId / phone / 易支付订单号）
+- `customer_logins` 客户登录留痕（最多 1000 条，FIFO；带 phone / employeeId / method）
+- `payment_orders` 易支付订单（最多 1000 条，FIFO；pending / paid；pending 订单不会被裁剪）
 - `passwordSalt` / `customerSecret` 服务自动生成的密钥盐
 
-老版本的 `state.json`（v1 schema，单页面无员工）启动时会自动迁移：旧的 lit / activities 全部归到默认 admin 名下。
+老版本的 `data/state.json` 启动时会自动迁移到 `data/state.sqlite`：旧的 lit / activities 全部归到默认 admin 名下。迁移后 `state.json` 只作为历史来源保留，不再作为主存储。
 
 ---
 
@@ -158,14 +177,13 @@ public/
     gifts/custom-<id>.png    礼物自定义图（admin 上传）
     employees/<empId>/
       avatar.png             员工头像
-      wechat-qr.png          员工收款码
 ```
 
 ---
 
 ## 开发约定
 
-- **零外部依赖**，所有第三方接口（如腾讯云 SMS）走原生 HTTPS
+- **零外部依赖**，所有第三方接口（如腾讯云 SMS）走原生 HTTPS；本地持久化走 Node 内置 `node:sqlite`
 - 后端 = `server.js` 单文件（约 900 行）
 - 前端三个页面：[visitor.html](public/visitor.html) `+visitor.js`、[admin.html](public/admin.html) `+admin.js`、[no-access.html](public/no-access.html)
 - 共享一份 [styles.css](public/styles.css)（白色主题）
@@ -178,19 +196,16 @@ public/
 ## 常见问题
 
 **Q: 我把所有 admin 都关了 / 删了，进不去后台怎么办？**
-A: 服务自带保护：不允许把唯一的 admin 改成 employee、不允许停用最后一个启用中的 admin、不允许删唯一 admin。如果还是进不去（比如手动改坏了 state.json），停服 → 删除 `data/state.json` → 重启会按 `ADMIN_PASSWORD` 重新创建默认 admin。
+A: 服务自带保护：不允许把唯一的 admin 改成 employee、不允许停用最后一个启用中的 admin、不允许删唯一 admin。如果还是进不去（比如手动改坏了数据库），停服 → 备份并删除 `data/state.sqlite` → 重启会按 `ADMIN_PASSWORD` 重新创建默认 admin。
 
 **Q: 想给员工一个临时链接但只能访问一次？**
 A: 暂未支持，详见 [TODO.md](TODO.md)。
 
 **Q: 客户送礼后系统会自动跳转微信吗？**
-A: 看员工配置：
-- 上传了**收款码图片** → 弹层显示二维码 + 金额，客户长按扫码
-- 没收款码但配了**微信跳转链接**（含 `{amount}` 占位符） → 直接 `weixin://` 跳转
-- 都没配 → 仅点亮灯牌，不跳转
+A: 不再使用旧微信跳转。客户会先进入易支付收银台，只有易支付回调验签成功后，系统才会自动点亮礼物。
 
 **Q: 怎么备份数据？**
-A: 备份 `data/state.json` 和 `public/assets/employees/` 即可。
+A: 备份 `data/state.sqlite` 和 `public/assets/employees/` 即可；如果设置了 `DATA_DIR`，请备份该目录下的 `state.sqlite`。
 
 ---
 

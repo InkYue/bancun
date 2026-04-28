@@ -2,6 +2,30 @@
 
 > 截至 2026-04-28 的实现状态。新功能上线请同步追加。
 
+## v0.5 · SQLite 单文件持久化
+
+### 数据存储
+- [x] 主存储从 `data/state.json` 迁移到 `data/state.sqlite`，使用 Node 内置 `node:sqlite`，保持零 npm 依赖
+- [x] 启动时自动创建 SQLite schema，并在空库时创建默认 admin
+- [x] 老版本 `data/state.json` 可自动迁移到 SQLite，保留员工、礼物、送礼记录、客户登录和支付订单数据
+- [x] 支持 `DATA_DIR` 指定数据目录，方便测试、部署和权限隔离
+- [x] 写入使用 SQLite 事务，避免半写入状态
+
+---
+
+## v0.4 · 易支付真实回调点亮
+
+### 支付
+- [x] 移除客户侧旧微信跳转 / 收款码弹层 / "我已完成支付"荣誉制点亮流程
+- [x] 新增易支付配置：网关地址、商户 ID、默认支付方式、启用状态；商户 KEY 仅从 `YIPAY_KEY` / `EASYPAY_KEY` 环境变量读取
+- [x] 客户送礼先创建易支付订单，生成带 MD5 签名的 `/submit.php` 支付链接
+- [x] 易支付异步通知 `/api/pay/yipay/notify` 验签成功后自动点亮礼物并写入送礼记录
+- [x] 同步跳转 `/api/pay/yipay/return` 回到员工页，并尝试补处理成功订单
+- [x] 保留订单状态 `paymentOrders[]`，支持 pending / paid 基础状态；pending 订单不会被历史订单裁剪掉
+- [x] 有 pending 订单时阻止修改易支付网关、商户 ID 或支付方式，避免回调验签失败
+
+---
+
 ## v0.3 · 多员工 + 客户身份化（当前版本）
 
 ### 路由 / 多租户
@@ -11,11 +35,11 @@
 - [x] `data/state.json` v1 schema 自动迁移到 v2（保留旧数据，归到默认 admin）
 
 ### 员工 / 角色
-- [x] 员工实体：slug + name + role + password + avatar + 自己的收款码 + 自己的 wechatPayUrl + intro + litGiftIds
+- [x] 员工实体：slug + name + role + password + avatar + intro + litGiftIds（旧 wechatPayUrl / wechatQrPath 字段保留兼容但客户支付不再使用）
 - [x] 角色：`admin`（管全站）/ `employee`（仅管自己）
 - [x] 至少保留一名启用中的 admin（删除 / 停用 / 降权保护）
 - [x] 员工管理视图：搜索 / 角色筛选 / 创建 / 编辑 / 启停 / 删除
-- [x] admin 代员工：上传收款码、一键熄灭
+- [x] admin 代员工：一键熄灭
 
 ### 客户身份
 - [x] 手机号格式校验（前端 + 后端 11 位中国大陆 1[3-9]\d{9}）
@@ -29,11 +53,11 @@
 - [x] 顶栏（品牌 + 同步状态 + 角色 chip + 刷新 + 退出）
 - [x] 侧边栏（角色感知 — employee 看不见 admin-only 入口）
 - [x] 仪表盘：累计 / 总次数 / 今日 / 员工启用比 (admin) / 已点亮比 (employee) + 礼物分布 + 最近送礼
-- [x] 我的页面：访问链接 + 一键复制 / 个人资料 / 头像上传 / 我的收款码 / 修改密码 / 一键全部熄灭
+- [x] 我的页面：访问链接 + 一键复制 / 个人资料 / 头像上传 / 修改密码 / 一键全部熄灭
 - [x] 员工管理（仅 admin）
 - [x] 礼物目录（仅 admin）：搜索 / 分类筛选 / 上下线 / 编辑 / 替换图 / 恢复默认（移除了之前的"单条点亮 chip"）
 - [x] 送礼记录（仅 admin）：员工筛选下拉（含"全站汇总"）+ 搜索 + 按筛选清空
-- [x] 站点设置（仅 admin）：站点名 / 默认收款链接 / SMS 配置 / 测试短信
+- [x] 站点设置（仅 admin）：站点名 / 对外访问域名 / 易支付配置 / SMS 配置 / 测试短信
 
 ### SMS 网关
 - [x] 后台 SMS 配置 UI：开关 + SecretId/SecretKey/SdkAppId/Region/SignName/TemplateId
@@ -47,7 +71,7 @@
 - [x] 员工 token：base64("slug:password")，每次请求重新校验（密码改 → 旧 token 立即失效）
 - [x] 客户 token：base64("phone:hmac(phone, customerSecret)")，无服务端会话
 - [x] 角色保护：admin-only API 返回 403；客户 API 未登录返回 401
-- [x] 密码 sha256(salt + password)，盐随实例生成存于 state.json
+- [x] 密码 sha256(salt + password)，盐随实例生成存于 SQLite
 
 ### 视觉
 - [x] **整体白色配色**（visitor + admin + no-access 同一主题）
