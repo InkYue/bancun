@@ -5,7 +5,7 @@
 ## P0 - 上线前必做
 
 - [ ] **生产环境 HTTPS** — 当前服务是裸 HTTP，密码 / Token / 收款码都没加密。上线前必须前置 Nginx / Caddy 反代加 TLS。
-- [ ] **SecretKey 的存储** — `data/state.sqlite` 当前仍明文存腾讯云 SecretKey；易支付 KEY 已改为读取 `YIPAY_KEY` / `EASYPAY_KEY` 环境变量。上线前要么把数据库文件权限锁到 `chmod 600` + 给运行用户单独 `DATA_DIR`，要么继续把腾讯云 SecretKey 也改成环境变量。
+- [ ] **SecretKey / 商户 KEY 的存储** — `data/state.sqlite` 当前仍明文存腾讯云 SecretKey 和易支付商户 KEY。上线前要么把数据库文件权限锁到 `chmod 600` + 给运行用户单独 `DATA_DIR`，要么继续把这些密钥改成环境变量。
 - [ ] **修改默认 admin 密码** — 服务首次启动会创建 `slug=admin password=bancun-admin` 的默认账号。务必登录后立刻改。
 - [ ] **进程守护** — `node server.js` 直跑会跟着终端死。上线前用 systemd / pm2 / docker 包一层。
 

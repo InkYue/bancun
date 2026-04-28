@@ -30,7 +30,7 @@ PORT=8080 ADMIN_PASSWORD="my-strong-password" node server.js
 # 自定义数据目录（默认 ./data）
 DATA_DIR="/var/lib/bancun" node server.js
 
-# 启用易支付时，商户 KEY 从环境变量读取，不写入数据库
+# 易支付商户 KEY 推荐在后台填写；也可用环境变量作为兼容兜底
 YIPAY_KEY="your-yipay-merchant-key" node server.js
 ```
 
@@ -108,7 +108,7 @@ YIPAY_KEY="your-yipay-merchant-key" node server.js
 | 启用开关 | 开启后客户才能创建支付订单 |
 | 网关地址 | 默认 `https://ezfp.cn` |
 | 商户 ID（pid） | 易支付商户后台提供 |
-| 商户密钥 KEY | 通过服务端环境变量 `YIPAY_KEY` 或 `EASYPAY_KEY` 配置，不在后台表单和数据库保存 |
+| 商户密钥 KEY | 在后台填写并保存到 SQLite；已设置时留空保存不会覆盖原值，也可用 `YIPAY_KEY` / `EASYPAY_KEY` 作为兼容兜底 |
 | 默认支付方式 | `wxpay` / `alipay` / `qqpay` / `bank` |
 | 对外访问域名 | 用于生成 `notify_url` 和 `return_url`，生产必须是公网可访问 HTTPS 域名 |
 
@@ -156,7 +156,7 @@ YIPAY_KEY="your-yipay-merchant-key" node server.js
 - `defaultWechatPayUrl` 旧版默认微信收款链接（保留兼容，当前访客支付不再使用）
 - `disabledGiftIds` / `giftOverrides` 礼物目录改动
 - `smsConfig` SMS 网关配置（包含腾讯云 SecretKey 明文，**生产请确保数据库文件权限**）
-- `yipayConfig` 易支付配置（不包含商户 KEY；KEY 从 `YIPAY_KEY` / `EASYPAY_KEY` 环境变量读取）
+- `yipayConfig` 易支付配置（包含商户 KEY；已设置时后台输入框留空不会覆盖，环境变量 `YIPAY_KEY` / `EASYPAY_KEY` 可作为兜底）
 - `employees` 员工（id / slug / passwordHash / role / 自己的灯牌 / 头像）
 - `activities` 送礼记录（最多 1000 条，FIFO；带 employeeId / phone / 易支付订单号）
 - `customer_logins` 客户登录留痕（最多 1000 条，FIFO；带 phone / employeeId / method）
