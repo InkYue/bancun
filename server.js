@@ -43,6 +43,7 @@ const MAX_ACTIVITIES = 1000;
 const MAX_CUSTOMER_LOGINS = 1000;
 const MAX_PAYMENT_ORDERS = 1000;
 const VISITOR_FEED_LIMIT = 30;
+const MAX_GIFT_QUANTITY = 999;
 const SMS_CODE_TTL_MS = 5 * 60_000;
 const SMS_RESEND_INTERVAL_MS = 60_000;
 
@@ -131,6 +132,13 @@ function normalizeMoney(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0 || n >= 10_000_000) return '';
   return n.toFixed(2);
+}
+
+function normalizeGiftQuantity(value) {
+  if (value === undefined || value === null || value === '') return 1;
+  const quantity = Number(value);
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_GIFT_QUANTITY) return 0;
+  return quantity;
 }
 
 function isValidSlug(value) {
@@ -1283,19 +1291,21 @@ async function handleApi(request, response, pathname, query) {
     if (!baseGift || state.disabledGiftIds.includes(giftId)) { sendError(response, 404, '礼物不存在或已下架。'); return; }
     const gift = applyOverride(baseGift, state.giftOverrides?.[giftId]);
     const body = await readJson(request);
-    const amount = Number(body.amount);
-    if (!Number.isFinite(amount) || amount !== gift.price) { sendError(response, 400, '金额与礼物不匹配。'); return; }
+    const quantity = normalizeGiftQuantity(body.quantity);
+    if (!quantity) { sendError(response, 400, '礼物数量需为 1-999。'); return; }
+    const money = normalizeMoney(gift.price * quantity);
+    if (!money || normalizeMoney(body.amount) !== money) { sendError(response, 400, '金额与礼物数量不匹配。'); return; }
+    const giftName = quantity > 1 ? `${gift.name} x${quantity}` : gift.name;
 
     const baseUrl = externalBaseUrl(state, request);
     const outTradeNo = `bc${Date.now().toString(36)}${crypto.randomBytes(4).toString('hex')}`;
-    const money = normalizeMoney(gift.price);
     const order = {
       outTradeNo,
       tradeNo: '',
       employeeId: employee.id,
       employeeSlug: employee.slug,
       giftId: gift.id,
-      giftName: gift.name,
+      giftName,
       money,
       phone: customer.phone,
       payType: yipay.type,
@@ -1312,7 +1322,7 @@ async function handleApi(request, response, pathname, query) {
       out_trade_no: outTradeNo,
       notify_url: `${baseUrl}/api/pay/yipay/notify`,
       return_url: `${baseUrl}/api/pay/yipay/return`,
-      name: `${gift.name}`.slice(0, 60),
+      name: giftName.slice(0, 60),
       money,
       param: employee.slug
     };
