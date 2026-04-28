@@ -12,6 +12,7 @@ const toast = document.querySelector('#toast');
 let appState = {
   brandName: '半寸时光',
   wechatPayUrl: '',
+  backgroundMusicUrl: '',
   litGiftIds: [],
   gifts: []
 };
@@ -190,7 +191,7 @@ payButton.addEventListener('click', async () => {
 
 musicToggle.addEventListener('click', async () => {
   try {
-    const enabled = await audioEngine.toggleBgm();
+    const enabled = await audioEngine.toggleBgm(appState.backgroundMusicUrl);
     musicToggle.setAttribute('aria-label', enabled ? '关闭背景音乐' : '开启背景音乐');
     musicToggle.setAttribute('aria-pressed', String(enabled));
     musicToggle.querySelector('span').textContent = enabled ? '🔊' : '🔇';

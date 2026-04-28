@@ -28,6 +28,7 @@ class AudioEngine {
     this.masterGain = null;
     this.bgmNodes = [];
     this.bgmEnabled = false;
+    this.bgmAudio = null;
   }
 
   async ensureContext() {
@@ -50,16 +51,29 @@ class AudioEngine {
     return this.context;
   }
 
-  async toggleBgm() {
-    await this.ensureContext();
-
+  async toggleBgm(sourceUrl = '') {
     if (this.bgmEnabled) {
       this.stopBgm();
       return false;
     }
 
+    if (sourceUrl) {
+      await this.startAudioBgm(sourceUrl);
+      return true;
+    }
+
+    await this.ensureContext();
     this.startBgm();
     return true;
+  }
+
+  async startAudioBgm(sourceUrl) {
+    this.stopBgm();
+    this.bgmAudio = new Audio(sourceUrl);
+    this.bgmAudio.loop = true;
+    this.bgmAudio.volume = 0.42;
+    await this.bgmAudio.play();
+    this.bgmEnabled = true;
   }
 
   startBgm() {
@@ -104,7 +118,15 @@ class AudioEngine {
   }
 
   stopBgm() {
+    if (this.bgmAudio) {
+      this.bgmAudio.pause();
+      this.bgmAudio.currentTime = 0;
+      this.bgmAudio = null;
+    }
+
     if (!this.context) {
+      this.bgmNodes = [];
+      this.bgmEnabled = false;
       return;
     }
 
@@ -123,6 +145,13 @@ class AudioEngine {
   }
 
   async playGift(sound) {
+    if (sound?.url) {
+      const audio = new Audio(sound.url);
+      audio.volume = 0.86;
+      await audio.play();
+      return;
+    }
+
     const context = await this.ensureContext();
     if (!this.masterGain) {
       return;
