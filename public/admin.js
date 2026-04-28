@@ -945,8 +945,8 @@ function renderSettings() {
   yipayEnabled.checked = !!yipay.enabled;
   yipayGateway.value = yipay.gateway || 'https://ezfp.cn';
   yipayPid.value = yipay.pid || '';
-  yipayKey.value = yipay.keySet ? '已通过环境变量配置' : '';
-  yipayKey.placeholder = yipay.keySet ? 'YIPAY_KEY 已设置' : '请在服务端设置 YIPAY_KEY 环境变量';
+  yipayKey.value = '';
+  yipayKey.placeholder = yipay.keySet ? '已设置 · 留空则不修改' : '请输入商户 KEY';
   yipayType.value = yipay.type || 'wxpay';
   if (yipay.actuallyEnabled) {
     yipayStatus.textContent = '已启用';
@@ -1016,6 +1016,7 @@ yipaySaveButton.addEventListener('click', async () => {
       type: yipayType.value
     };
     if (yipayPid.value && !yipayPid.value.includes('****')) body.pid = yipayPid.value;
+    if (yipayKey.value) body.key = yipayKey.value;
     const r = await fetch('/api/admin/yipay', {
       method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }),
       body: JSON.stringify(body)

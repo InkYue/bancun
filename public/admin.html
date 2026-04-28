@@ -331,7 +331,7 @@
             <h2>易支付</h2>
             <span id="yipayStatus" class="card-sub">未配置</span>
           </header>
-          <p class="admin-tip">客户送礼会先创建易支付订单，只有收到易支付异步通知且验签成功后才会自动点亮礼物。商户 KEY 不在后台保存，请通过环境变量 <code>YIPAY_KEY</code> 配置。</p>
+          <p class="admin-tip">客户送礼会先创建易支付订单，只有收到易支付异步通知且验签成功后才会自动点亮礼物。商户 KEY 可在此填写，已设置时留空保存不会覆盖原值。</p>
           <label class="switch-row">
             <input id="yipayEnabled" type="checkbox" />
             <span>启用易支付</span>
@@ -339,7 +339,7 @@
           <div class="form-grid">
             <label><span>网关地址</span><input id="yipayGateway" placeholder="https://ezfp.cn" /></label>
             <label><span>商户 ID（pid）</span><input id="yipayPid" placeholder="如 1001" /></label>
-            <label><span>商户 KEY 状态</span><input id="yipayKey" readonly placeholder="请在服务端设置 YIPAY_KEY 环境变量" /></label>
+            <label><span>商户 KEY</span><input id="yipayKey" type="password" autocomplete="new-password" placeholder="请输入商户 KEY" /></label>
             <label><span>默认支付方式</span>
               <select id="yipayType">
                 <option value="wxpay">微信支付</option>

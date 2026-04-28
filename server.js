@@ -288,15 +288,16 @@ function normalizeYipayConfig(raw) {
     enabled: Boolean(raw.enabled),
     gateway: normalizeYipayGateway(raw.gateway),
     pid: normalizeText(raw.pid, '', 40),
-    key: '',
+    key: normalizeText(raw.key, '', 160),
     type: validYipayTypes.has(raw.type) ? raw.type : fb.type
   };
 }
 
 function effectiveYipayConfig(state) {
+  const stored = state.yipayConfig || defaultState().yipayConfig;
   return {
-    ...state.yipayConfig,
-    key: envYipayKey
+    ...stored,
+    key: stored.key || envYipayKey
   };
 }
 
@@ -310,7 +311,7 @@ function publicYipayConfigView(cfg) {
     gateway: cfg.gateway || defaultYipayGateway,
     pid: cfg.pid ? `${cfg.pid.slice(0, 3)}****${cfg.pid.slice(-2)}` : '',
     keySet: Boolean(cfg.key),
-    keySource: cfg.key ? 'env' : '',
+    keySource: cfg.key ? 'configured' : '',
     type: validYipayTypes.has(cfg.type) ? cfg.type : 'wxpay',
     actuallyEnabled: isYipayActuallyEnabled(cfg)
   };
@@ -652,7 +653,7 @@ function readStateFromSqlite(db) {
       enabled: meta.yipayEnabled === '1',
       gateway: meta.yipayGateway || defaultYipayGateway,
       pid: meta.yipayPid || '',
-      key: '',
+      key: meta.yipayKey || '',
       type: meta.yipayType || 'wxpay'
     },
     employees,
@@ -716,6 +717,7 @@ function writeStateToSqlite(db, state) {
       yipayEnabled: next.yipayConfig.enabled ? '1' : '0',
       yipayGateway: next.yipayConfig.gateway,
       yipayPid: next.yipayConfig.pid,
+      yipayKey: next.yipayConfig.key,
       yipayType: next.yipayConfig.type,
       passwordSalt: next.passwordSalt,
       customerSecret: next.customerSecret,
@@ -1482,11 +1484,15 @@ async function handleApi(request, response, pathname, query) {
       const nextGateway = typeof body.gateway === 'string' ? normalizeYipayGateway(body.gateway) : state.yipayConfig.gateway;
       const nextPid = typeof body.pid === 'string' && body.pid.trim() && !body.pid.includes('****')
         ? body.pid.trim().slice(0, 40) : state.yipayConfig.pid;
+      const nextKey = typeof body.key === 'string' && body.key.trim() && !body.key.includes('****')
+        ? body.key.trim().slice(0, 160) : state.yipayConfig.key;
       const nextType = validYipayTypes.has(body.type) ? body.type : state.yipayConfig.type;
       const hasPendingOrders = state.paymentOrders.some((o) => o.status === 'pending');
-      const changesPaymentIdentity = nextGateway !== state.yipayConfig.gateway || nextPid !== state.yipayConfig.pid || nextType !== state.yipayConfig.type;
+      const currentEffective = effectiveYipayConfig(state);
+      const nextEffectiveKey = nextKey || envYipayKey;
+      const changesPaymentIdentity = nextGateway !== state.yipayConfig.gateway || nextPid !== state.yipayConfig.pid || nextType !== state.yipayConfig.type || nextEffectiveKey !== currentEffective.key;
       if (hasPendingOrders && changesPaymentIdentity) {
-        sendError(response, 409, '仍有待支付订单，暂不能修改易支付网关、商户 ID 或支付方式。请等待回调完成或稍后再试。');
+        sendError(response, 409, '仍有待支付订单，暂不能修改易支付网关、商户 ID、商户 KEY 或支付方式。请等待回调完成或稍后再试。');
         return;
       }
       const merged = {
@@ -1494,7 +1500,7 @@ async function handleApi(request, response, pathname, query) {
         enabled: Boolean(body.enabled),
         gateway: nextGateway,
         pid: nextPid,
-        key: '',
+        key: nextKey,
         type: nextType
       };
       const next = await writeState({ ...state, yipayConfig: normalizeYipayConfig(merged) });
