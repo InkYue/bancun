@@ -6,6 +6,13 @@
 - 16 个礼物图标：`public/assets/gifts/{gift-id}.png`
 - 可选音频素材：`public/assets/audio/`
 
+后台上传的素材会自动保存到：
+
+- 自定义商品图片：`public/uploads/gifts/`
+- 自定义商品音乐和背景音乐：`public/uploads/audio/`
+
+手动放入 `public/assets/` 的文件适合做默认素材；后台上传适合日常运营修改。
+
 礼物 ID 对应关系：
 
 1. `lollipop` 棒棒糖
