@@ -35,11 +35,22 @@
             <span>微信收款跳转地址</span>
             <input id="payUrlInput" placeholder="支持 {amount} / {giftName} / {giftId} 占位符" />
           </label>
+          <label class="wide-field">
+            <span>背景音乐</span>
+            <input id="backgroundMusicInput" type="file" accept="audio/mpeg,audio/mp3,audio/wav,audio/ogg" />
+          </label>
         </div>
         <div class="admin-actions">
           <button id="saveAdminButton" class="primary-button" type="button">保存后台设置</button>
           <button id="resetButton" class="danger-button" type="button">一键重置全部变暗</button>
         </div>
+      </section>
+
+      <section class="admin-panel" aria-labelledby="giftEditorTitle">
+        <p class="eyebrow">Gift Editor</p>
+        <h2 id="giftEditorTitle">商品自定义</h2>
+        <p class="admin-note">价格和礼物位置保持固定，避免影响游客输入金额匹配；可自定义商品名称、图片和该礼物触发音乐。</p>
+        <div id="giftEditorList" class="gift-editor-list"></div>
       </section>
     </main>
 
