@@ -34,6 +34,7 @@ const sqliteFile = path.join(dataDir, 'state.sqlite');
 let sqliteDb = null;
 
 const port = Number.parseInt(process.env.PORT || '5173', 10);
+const host = process.env.HOST || '0.0.0.0';
 const bootstrapAdminPassword = process.env.ADMIN_PASSWORD || process.env.ADMIN_TOKEN || 'bancun-admin';
 const defaultWechatPayUrl =
   process.env.WECHAT_PAY_URL ||
@@ -1926,8 +1927,9 @@ const server = http.createServer(async (request, response) => {
 
 await ensureStateFile();
 
-server.listen(port, () => {
+server.listen(port, host, () => {
   console.log(`半寸时光礼物单已启动：http://localhost:${port}`);
+  console.log(`监听地址：${host}:${port}`);
   console.log(`后台地址：http://localhost:${port}/admin`);
   console.log(`默认 admin 账号：slug=admin，密码=${bootstrapAdminPassword}（首次启动后请尽快修改）`);
 });
