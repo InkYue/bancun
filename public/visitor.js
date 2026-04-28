@@ -32,11 +32,6 @@ const payButton = $('#payButton');
 const musicToggle = $('#musicToggle');
 const toast = $('#toast');
 
-const overlay = $('#payOverlay');
-const overlayTitle = $('#overlayTitle');
-const overlayQr = $('#overlayQr');
-const overlayPaid = $('#overlayPaid');
-
 const loginGate = $('#loginGate');
 const phoneInput = $('#phoneInput');
 const phoneError = $('#phoneError');
@@ -50,8 +45,8 @@ const gateHint = $('#gateHint');
 
 /* 状态 */
 let appState = null;
-let activeGift = null;
 let smsRequired = false;
+let paying = false;
 
 const currencyFormatter = new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', maximumFractionDigits: 0 });
 
@@ -182,7 +177,7 @@ function updateMatchHint() {
     matchHint.classList.remove('is-ok');
     return;
   }
-  matchHint.textContent = `已匹配：${gift.name}（￥${gift.price}），点击下方按钮支付并点亮。`;
+  matchHint.textContent = `已匹配：${gift.name}（￥${gift.price}），点击下方按钮发起支付。`;
   matchHint.classList.add('is-ok');
   matchHint.classList.remove('is-error');
 }
@@ -193,17 +188,8 @@ function findGiftByAmount(value) {
   return appState?.gifts.find((g) => g.price === amount) || null;
 }
 
-function buildWechatUrl(gift) {
-  const raw = appState.employee.wechatPayUrl || '';
-  if (!raw) return '';
-  return raw
-    .replaceAll('{amount}', encodeURIComponent(String(gift.price)))
-    .replaceAll('{giftName}', encodeURIComponent(gift.name))
-    .replaceAll('{giftId}', encodeURIComponent(gift.id));
-}
-
-async function lightGift(gift) {
-  const r = await fetch(`/api/employees/${slug}/gifts/${gift.id}/light`, {
+async function createPayment(gift) {
+  const r = await fetch(`/api/employees/${slug}/gifts/${gift.id}/pay`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-customer-token': getToken() },
     body: JSON.stringify({ amount: gift.price })
@@ -215,52 +201,39 @@ async function lightGift(gift) {
   }
   if (!r.ok) {
     const body = await r.json().catch(() => ({}));
-    throw new Error(body.error || '点亮礼物失败。');
+    throw new Error(body.error || '创建支付订单失败。');
   }
-  const data = await r.json();
-  appState.employee.litGiftIds = data.litGiftIds || appState.employee.litGiftIds;
-  await audioEngine.playGift(gift.sound);
-  render();
+  return r.json();
 }
 
-function startPay(gift) {
+async function startPay(gift) {
   if (!getToken()) { showLoginGate(); return; }
-  activeGift = gift;
-  if (appState.employee.wechatQrPath) {
-    openOverlay(gift);
-    return;
-  }
-  const url = buildWechatUrl(gift);
-  if (url) window.location.href = url;
-  lightGift(gift)
-    .then(() => showToast(`${gift.name} 已点亮，正在跳转微信。`))
-    .catch((err) => showToast(err.message || '点亮失败。'));
-}
-
-function openOverlay(gift) {
-  overlayTitle.textContent = `— ${gift.name} · ¥${gift.price} —`;
-  overlayQr.src = appState.employee.wechatQrPath;
-  overlayQr.alt = `${gift.name} 收款码`;
-  overlay.hidden = false;
-  document.body.style.overflow = 'hidden';
-}
-function closeOverlay() {
-  overlay.hidden = true;
-  activeGift = null;
-  document.body.style.overflow = '';
-}
-
-overlay.addEventListener('click', (e) => { if (e.target.matches('[data-close-overlay]')) closeOverlay(); });
-overlayPaid.addEventListener('click', async () => {
-  if (!activeGift) return closeOverlay();
-  const gift = activeGift;
+  if (!appState.paymentReady) { showToast('支付暂未配置，请联系管理员。'); return; }
+  if (paying) return;
+  paying = true;
+  payButton.disabled = true;
   try {
-    await lightGift(gift);
-    showToast(`${gift.name} 已点亮 · 感谢你的甜蜜！`);
+    const data = await createPayment(gift);
+    if (!data.paymentUrl) throw new Error('支付链接生成失败。');
+    showToast('订单已创建，正在前往易支付。');
+    window.location.href = data.paymentUrl;
   } catch (err) {
-    showToast(err.message || '点亮失败');
-  } finally { closeOverlay(); }
-});
+    showToast(err.message || '支付失败。');
+    paying = false;
+    payButton.disabled = false;
+  }
+}
+
+function handlePaymentReturnHint() {
+  const params = new URLSearchParams(window.location.search);
+  const outcome = params.get('pay');
+  if (!outcome) return;
+  if (outcome === 'success') showToast('支付成功，页面正在同步点亮状态。');
+  else if (outcome === 'failed' || outcome === 'mismatch') showToast('支付未完成，请重新发起支付或联系管理员。');
+  else showToast('支付结果处理中，请稍后刷新查看点亮状态。');
+  const cleanUrl = `${window.location.pathname}${window.location.hash || ''}`;
+  window.history.replaceState(null, '', cleanUrl);
+}
 
 amountInput.addEventListener('input', updateMatchHint);
 payButton.addEventListener('click', () => {
@@ -278,8 +251,6 @@ musicToggle.addEventListener('click', async () => {
     musicToggle.classList.toggle('is-active', enabled);
   } catch { showToast('当前浏览器暂不支持 WebAudio。'); }
 });
-
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay.hidden) closeOverlay(); });
 
 customerLogout.addEventListener('click', () => {
   if (!confirm('确认退出当前手机号？')) return;
@@ -399,6 +370,9 @@ async function tryLogin() {
 async function bootstrap() {
   try {
     await loadEmployeeState();
+    handlePaymentReturnHint();
+    const savedPhone = (() => { try { return localStorage.getItem(PHONE_KEY) || ''; } catch { return ''; } })();
+    if (savedPhone) phoneInput.value = savedPhone;
   } catch (e) {
     if (e.message !== 'not-found') showToast(e.message || '加载失败。');
     return;

@@ -96,6 +96,13 @@ const siteUrlInput = $('#siteUrlInput');
 const siteUrlPreview = $('#siteUrlPreview');
 const payUrlInput = $('#payUrlInput');
 const saveAdminButton = $('#saveAdminButton');
+const yipayStatus = $('#yipayStatus');
+const yipayEnabled = $('#yipayEnabled');
+const yipayGateway = $('#yipayGateway');
+const yipayPid = $('#yipayPid');
+const yipayKey = $('#yipayKey');
+const yipayType = $('#yipayType');
+const yipaySaveButton = $('#yipaySaveButton');
 const smsStatus = $('#smsStatus');
 const smsEnabled = $('#smsEnabled');
 const smsSecretId = $('#smsSecretId');
@@ -572,14 +579,12 @@ function renderEmployees() {
       <div class="emp-row-ops">
         <button class="ghost-button" data-act="copy" title="复制链接发给员工 / 客户">📋 复制链接</button>
         <a class="ghost-button icon-button" href="${escapeAttr(publicEmployeeUrl(e.slug))}" target="_blank" rel="noreferrer" title="新标签页预览">↗</a>
-        <button class="ghost-button" data-act="qr">收款码</button>
         <button class="ghost-button" data-act="reset">熄灭</button>
         <button class="ghost-button" data-act="edit">编辑</button>
         <button class="link-danger" data-act="del">删除</button>
       </div>`;
     card.querySelector('[data-act="copy"]').addEventListener('click', () => copyEmployeeUrl(e));
     card.querySelector('[data-act="edit"]').addEventListener('click', () => openEmpModal(e));
-    card.querySelector('[data-act="qr"]').addEventListener('click', () => uploadEmployeeQr(e));
     card.querySelector('[data-act="reset"]').addEventListener('click', () => resetEmployeeLit(e));
     card.querySelector('[data-act="del"]').addEventListener('click', () => deleteEmployee(e));
     empList.append(card);
@@ -628,7 +633,7 @@ empSaveButton.addEventListener('click', async () => {
 });
 
 async function deleteEmployee(e) {
-  if (!confirm(`删除员工【${e.name}】？\n该员工的灯牌、送礼记录、头像/收款码会一并清除。`)) return;
+  if (!confirm(`删除员工【${e.name}】？\n该员工的灯牌、送礼记录、头像会一并清除。`)) return;
   try {
     const r = await fetch(`/api/admin/employees/${e.id}`, { method: 'DELETE', headers: authHeaders() });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || '删除失败');
@@ -662,30 +667,6 @@ async function copyEmployeeUrl(e) {
     catch { showToast('复制失败，请手动复制：' + url, 'error'); }
     ta.remove();
   }
-}
-
-function uploadEmployeeQr(e) {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'image/png,image/jpeg,image/webp';
-  input.addEventListener('change', async (ev) => {
-    const file = ev.target.files?.[0];
-    if (!file) return;
-    if (file.size > 4_000_000) { showToast('图片需在 4MB 以内', 'error'); return; }
-    try {
-      const dataUrl = await fileToDataUrl(file);
-      const r = await fetch(`/api/admin/employees/${e.id}/wechat-qr`, {
-        method: 'POST',
-        headers: authHeaders({ 'content-type': 'application/json' }),
-        body: JSON.stringify({ dataUrl })
-      });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || '上传失败');
-      await refreshAdmin();
-      render();
-      showToast(`${e.name} 收款码已更新`);
-    } catch (err) { showToast(err.message, 'error'); }
-  });
-  input.click();
 }
 
 /* ---------- 礼物目录（admin） ---------- */
@@ -960,6 +941,23 @@ function renderSettings() {
   siteUrlInput.value = adminState.siteUrl || '';
   updateSiteUrlPreview();
   payUrlInput.value = adminState.defaultWechatPayUrl || '';
+  const yipay = adminState.yipay || {};
+  yipayEnabled.checked = !!yipay.enabled;
+  yipayGateway.value = yipay.gateway || 'https://ezfp.cn';
+  yipayPid.value = yipay.pid || '';
+  yipayKey.value = yipay.keySet ? '已通过环境变量配置' : '';
+  yipayKey.placeholder = yipay.keySet ? 'YIPAY_KEY 已设置' : '请在服务端设置 YIPAY_KEY 环境变量';
+  yipayType.value = yipay.type || 'wxpay';
+  if (yipay.actuallyEnabled) {
+    yipayStatus.textContent = '已启用';
+    yipayStatus.className = 'card-sub status-ok';
+  } else if (yipay.enabled) {
+    yipayStatus.textContent = '已开启但配置不完整';
+    yipayStatus.className = 'card-sub status-warn';
+  } else {
+    yipayStatus.textContent = '未启用';
+    yipayStatus.className = 'card-sub';
+  }
   const sms = adminState.sms || {};
   smsEnabled.checked = !!sms.enabled;
   smsSecretId.value = sms.secretId || '';
@@ -1003,9 +1001,30 @@ saveAdminButton.addEventListener('click', async () => {
     adminState.brandName = data.brandName;
     adminState.siteUrl = data.siteUrl;
     adminState.defaultWechatPayUrl = data.defaultWechatPayUrl;
-    /* siteUrl 影响所有视图的链接，整体重渲 */
+    if (data.yipay) adminState.yipay = data.yipay;
+    /* siteUrl 影响所有视图的链接和支付回调，整体重渲 */
     render();
     showToast('已保存');
+  } catch (e) { showToast(e.message, 'error'); }
+});
+
+yipaySaveButton.addEventListener('click', async () => {
+  try {
+    const body = {
+      enabled: yipayEnabled.checked,
+      gateway: yipayGateway.value,
+      type: yipayType.value
+    };
+    if (yipayPid.value && !yipayPid.value.includes('****')) body.pid = yipayPid.value;
+    const r = await fetch('/api/admin/yipay', {
+      method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }),
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || '保存失败');
+    const data = await r.json();
+    adminState.yipay = data.yipay;
+    renderSettings();
+    showToast('易支付配置已保存');
   } catch (e) { showToast(e.message, 'error'); }
 });
 

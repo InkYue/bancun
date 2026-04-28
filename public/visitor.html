@@ -50,13 +50,13 @@
 
       <section class="payment-panel" aria-labelledby="paymentTitle">
         <p class="eyebrow">游客送礼</p>
-        <h2 id="paymentTitle">输入金额，跳转微信收款</h2>
+        <h2 id="paymentTitle">输入金额，通过易支付付款</h2>
         <label class="amount-field" for="amountInput">
           <span>礼物金额（元）</span>
           <input id="amountInput" inputmode="numeric" autocomplete="off" placeholder="例如 520" />
         </label>
         <p id="matchHint" class="match-hint">输入金额后会自动匹配对应礼物，也可直接点上方礼物。</p>
-        <button id="payButton" class="primary-button" type="button">去微信支付并点亮</button>
+        <button id="payButton" class="primary-button" type="button">去支付</button>
       </section>
     </main>
 
@@ -84,24 +84,6 @@
 
         <button id="loginButton" class="primary-button" type="button">进入</button>
         <p class="login-hint" id="gateHint">您的手机号将作为送礼记录的身份标识</p>
-      </div>
-    </div>
-
-    <!-- 微信支付弹层 -->
-    <div id="payOverlay" class="overlay" hidden>
-      <div class="overlay-mask" data-close-overlay></div>
-      <div class="overlay-card" role="dialog" aria-modal="true" aria-labelledby="overlayTitle">
-        <button class="overlay-close" type="button" aria-label="关闭" data-close-overlay>×</button>
-        <p class="eyebrow">微信扫码支付</p>
-        <h3 id="overlayTitle">— 礼物名 · ¥0 —</h3>
-        <div class="qr-frame">
-          <img id="overlayQr" alt="微信收款码" />
-        </div>
-        <p class="overlay-hint">长按二维码 → 用微信扫码 → 输入金额支付</p>
-        <div class="overlay-actions">
-          <button id="overlayCancel" type="button" class="ghost-button" data-close-overlay>取消</button>
-          <button id="overlayPaid" type="button" class="primary-button">我已完成支付</button>
-        </div>
       </div>
     </div>
 
