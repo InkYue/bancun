@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#160d0c" />
+    <title>半寸时光后台管理</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+
+    <main class="page-shell admin-page">
+      <section class="hero-card admin-hero" aria-labelledby="adminBrandName">
+        <p class="eyebrow">Admin Console</p>
+        <h1 id="adminBrandName">半寸时光</h1>
+        <p class="subtitle">后台管理</p>
+        <div class="ribbon">编辑名称栏 / 重置礼物点亮状态</div>
+      </section>
+
+      <section class="admin-panel" aria-labelledby="adminTitle">
+        <p class="eyebrow">Private Entrance</p>
+        <h2 id="adminTitle">管理设置</h2>
+        <div class="admin-grid">
+          <label>
+            <span>后台口令</span>
+            <input id="adminToken" type="password" placeholder="默认 bancun-admin，可用 ADMIN_TOKEN 修改" />
+          </label>
+          <label>
+            <span>名字栏</span>
+            <input id="brandInput" maxlength="24" placeholder="半寸时光" />
+          </label>
+          <label class="wide-field">
+            <span>微信收款跳转地址</span>
+            <input id="payUrlInput" placeholder="支持 {amount} / {giftName} / {giftId} 占位符" />
+          </label>
+        </div>
+        <div class="admin-actions">
+          <button id="saveAdminButton" class="primary-button" type="button">保存后台设置</button>
+          <button id="resetButton" class="danger-button" type="button">一键重置全部变暗</button>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/admin.js"></script>
+  </body>
+</html>
