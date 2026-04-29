@@ -43,7 +43,6 @@ const defaultWechatPayUrl =
 const MAX_ACTIVITIES = 1000;
 const MAX_CUSTOMER_LOGINS = 1000;
 const MAX_PAYMENT_ORDERS = 1000;
-const VISITOR_FEED_LIMIT = 30;
 const MAX_GIFT_QUANTITY = 999;
 const SMS_CODE_TTL_MS = 5 * 60_000;
 const SMS_RESEND_INTERVAL_MS = 60_000;
@@ -51,6 +50,22 @@ const SMS_RESEND_INTERVAL_MS = 60_000;
 const defaultYipayGateway = 'https://ezfp.cn';
 const envYipayKey = process.env.YIPAY_KEY || process.env.EASYPAY_KEY || '';
 const validYipayTypes = new Set(['alipay', 'wxpay', 'qqpay', 'bank', 'jdpay', 'paypal', 'usdt']);
+const defaultLakalaGateway = 'https://s2.lakala.com/labs/txn/labs_dycode_create';
+const validPaymentProviders = new Set(['yipay', 'lakala']);
+const envPaymentProvider = validPaymentProviders.has(process.env.PAYMENT_PROVIDER) ? process.env.PAYMENT_PROVIDER : '';
+const envLakalaAppId = process.env.LAKALA_APP_ID || '';
+const envLakalaSerialNo = process.env.LAKALA_SERIAL_NO || '';
+const envLakalaPrivateKey = (process.env.LAKALA_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+const envLakalaPublicKey = (process.env.LAKALA_PUBLIC_KEY || '').replace(/\\n/g, '\n');
+const envLakalaMercId = process.env.LAKALA_MERC_ID || '';
+const envLakalaTermNo = process.env.LAKALA_TERM_NO || '';
+const envLakalaMerName = process.env.LAKALA_MER_NAME || '';
+const envLakalaOrderSource = process.env.LAKALA_ORDER_SOURCE || '';
+const defaultPaymentProvider = envPaymentProvider || 'yipay';
+
+function validPaymentProvider(value) {
+  return value === 'yipay' || value === 'lakala';
+}
 
 /* ============================================================
  * 礼物目录（id 不要乱改，会影响已点亮记录）
@@ -129,6 +144,18 @@ function normalizeYipayGateway(value) {
   } catch { return defaultYipayGateway; }
 }
 
+function normalizeLakalaGateway(value) {
+  if (typeof value !== 'string') return defaultLakalaGateway;
+  const trimmed = value.trim().replace(/\/+$/, '');
+  if (!trimmed) return defaultLakalaGateway;
+  if (!/^https?:\/\//i.test(trimmed)) return defaultLakalaGateway;
+  try {
+    const u = new URL(trimmed);
+    const normalized = `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, '')}`;
+    return normalized.slice(0, 240) || defaultLakalaGateway;
+  } catch { return defaultLakalaGateway; }
+}
+
 function normalizeMoney(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0 || n >= 10_000_000) return '';
@@ -188,12 +215,26 @@ function defaultState() {
       signName: '',
       templateId: ''
     },
+    paymentProvider: defaultPaymentProvider,
     yipayConfig: {
       enabled: false,
       gateway: defaultYipayGateway,
       pid: '',
       key: '',
       type: 'wxpay'
+    },
+    lakalaConfig: {
+      enabled: false,
+      gateway: defaultLakalaGateway,
+      appId: '',
+      serialNo: '',
+      privateKey: '',
+      publicKey: '',
+      mercId: '',
+      termNo: '',
+      merName: '',
+      orderSource: '',
+      codeValidPeriod: 180
     },
     employees: [],
     activities: [],
@@ -274,16 +315,21 @@ function normalizePaymentOrder(raw, employeeIds) {
   if (typeof raw.employeeId !== 'string' || !employeeIds.has(raw.employeeId)) return null;
   if (typeof raw.giftId !== 'string' || !giftIds.has(raw.giftId)) return null;
   const status = raw.status === 'paid' ? 'paid' : raw.status === 'failed' ? 'failed' : 'pending';
+  const provider = validPaymentProviders.has(raw.provider) ? raw.provider : 'yipay';
   return {
     outTradeNo: raw.outTradeNo.slice(0, 64),
     tradeNo: typeof raw.tradeNo === 'string' ? raw.tradeNo.slice(0, 64) : '',
+    provider,
     employeeId: raw.employeeId,
     employeeSlug: isValidSlug(raw.employeeSlug) ? raw.employeeSlug.toLowerCase() : '',
     giftId: raw.giftId,
     giftName: typeof raw.giftName === 'string' ? raw.giftName.slice(0, 40) : '',
     money: normalizeMoney(raw.money) || '0.00',
     phone: isValidPhone(raw.phone) ? raw.phone : '',
-    payType: validYipayTypes.has(raw.payType) ? raw.payType : 'wxpay',
+    payType: typeof raw.payType === 'string' && raw.payType ? raw.payType.slice(0, 20) : (provider === 'yipay' ? 'wxpay' : 'dynamic_qr'),
+    checkoutUrl: typeof raw.checkoutUrl === 'string' ? raw.checkoutUrl.slice(0, 600) : '',
+    checkoutPayload: typeof raw.checkoutPayload === 'string' ? raw.checkoutPayload.slice(0, 2000) : '',
+    checkoutExpiresAt: typeof raw.checkoutExpiresAt === 'string' ? raw.checkoutExpiresAt : '',
     status,
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString(),
     paidAt: typeof raw.paidAt === 'string' ? raw.paidAt : ''
@@ -324,6 +370,78 @@ function publicYipayConfigView(cfg) {
     type: validYipayTypes.has(cfg.type) ? cfg.type : 'wxpay',
     actuallyEnabled: isYipayActuallyEnabled(cfg)
   };
+}
+
+function normalizeLakalaConfig(raw) {
+  const fb = defaultState().lakalaConfig;
+  if (!raw || typeof raw !== 'object') return fb;
+  const codeValidPeriod = Number.parseInt(raw.codeValidPeriod, 10);
+  return {
+    enabled: Boolean(raw.enabled),
+    gateway: normalizeLakalaGateway(raw.gateway),
+    appId: normalizeText(raw.appId, fb.appId, 80),
+    serialNo: normalizeText(raw.serialNo, fb.serialNo, 120),
+    privateKey: normalizeText(raw.privateKey, fb.privateKey, 6000).replace(/\\n/g, '\n'),
+    publicKey: normalizeText(raw.publicKey, fb.publicKey, 6000).replace(/\\n/g, '\n'),
+    mercId: normalizeText(raw.mercId, fb.mercId, 32),
+    termNo: normalizeText(raw.termNo, fb.termNo, 32),
+    merName: normalizeText(raw.merName, fb.merName, 128),
+    orderSource: normalizeText(raw.orderSource, fb.orderSource, 16),
+    codeValidPeriod: Number.isInteger(codeValidPeriod) && codeValidPeriod >= 60 && codeValidPeriod <= 300
+      ? codeValidPeriod
+      : fb.codeValidPeriod
+  };
+}
+
+function effectiveLakalaConfig(state) {
+  const stored = state.lakalaConfig || defaultState().lakalaConfig;
+  return {
+    ...stored,
+    appId: stored.appId || envLakalaAppId,
+    serialNo: stored.serialNo || envLakalaSerialNo,
+    privateKey: stored.privateKey || envLakalaPrivateKey,
+    publicKey: stored.publicKey || envLakalaPublicKey,
+    mercId: stored.mercId || envLakalaMercId,
+    termNo: stored.termNo || envLakalaTermNo,
+    merName: stored.merName || envLakalaMerName,
+    orderSource: stored.orderSource || envLakalaOrderSource
+  };
+}
+
+function isLakalaActuallyEnabled(cfg) {
+  return Boolean(cfg && cfg.enabled && cfg.gateway && cfg.appId && cfg.serialNo && cfg.privateKey && cfg.publicKey && cfg.mercId && cfg.termNo && cfg.merName && cfg.orderSource);
+}
+
+function publicLakalaConfigView(cfg) {
+  return {
+    enabled: Boolean(cfg.enabled),
+    gateway: cfg.gateway || defaultLakalaGateway,
+    appId: cfg.appId ? `${cfg.appId.slice(0, 4)}****${cfg.appId.slice(-4)}` : '',
+    serialNo: cfg.serialNo ? `${cfg.serialNo.slice(0, 4)}****${cfg.serialNo.slice(-4)}` : '',
+    privateKeySet: Boolean(cfg.privateKey),
+    publicKeySet: Boolean(cfg.publicKey),
+    mercId: cfg.mercId ? `${cfg.mercId.slice(0, 4)}****${cfg.mercId.slice(-4)}` : '',
+    termNo: cfg.termNo || '',
+    merName: cfg.merName || '',
+    orderSource: cfg.orderSource || '',
+    codeValidPeriod: cfg.codeValidPeriod || 180,
+    actuallyEnabled: isLakalaActuallyEnabled(cfg)
+  };
+}
+
+function activePaymentProvider(state) {
+  const provider = envPaymentProvider || state.paymentProvider;
+  return validPaymentProviders.has(provider) ? provider : 'yipay';
+}
+
+function paymentProviderName(provider) {
+  return provider === 'lakala' ? '拉卡拉' : '易支付';
+}
+
+function isActivePaymentReady(state) {
+  const provider = activePaymentProvider(state);
+  if (provider === 'lakala') return isLakalaActuallyEnabled(effectiveLakalaConfig(state));
+  return isYipayActuallyEnabled(effectiveYipayConfig(state));
 }
 
 function trimPaymentOrders(orders) {
@@ -421,7 +539,9 @@ function normalizeState(value) {
       : [],
     giftOverrides: overrides,
     smsConfig: normalizeSmsConfig(value.smsConfig),
+    paymentProvider: validPaymentProvider(value.paymentProvider) ? value.paymentProvider : fb.paymentProvider,
     yipayConfig: normalizeYipayConfig(value.yipayConfig),
+    lakalaConfig: normalizeLakalaConfig(value.lakalaConfig),
     employees,
     activities,
     customerLogins,
@@ -599,6 +719,7 @@ function initSqliteSchema(db) {
     CREATE TABLE IF NOT EXISTS payment_orders (
       out_trade_no TEXT PRIMARY KEY,
       trade_no TEXT,
+      provider TEXT NOT NULL DEFAULT 'yipay',
       employee_id TEXT NOT NULL,
       employee_slug TEXT,
       gift_id TEXT NOT NULL,
@@ -606,12 +727,24 @@ function initSqliteSchema(db) {
       money TEXT NOT NULL,
       phone TEXT,
       pay_type TEXT NOT NULL,
+      checkout_url TEXT,
+      checkout_payload TEXT,
+      checkout_expires_at TEXT,
       status TEXT NOT NULL,
       created_at TEXT NOT NULL,
       paid_at TEXT,
       FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
     );
   `);
+  ensureSqliteColumn(db, 'payment_orders', 'provider', "TEXT NOT NULL DEFAULT 'yipay'");
+  ensureSqliteColumn(db, 'payment_orders', 'checkout_url', 'TEXT');
+  ensureSqliteColumn(db, 'payment_orders', 'checkout_payload', 'TEXT');
+  ensureSqliteColumn(db, 'payment_orders', 'checkout_expires_at', 'TEXT');
+}
+
+function ensureSqliteColumn(db, table, column, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((r) => r.name);
+  if (!columns.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 
 function readStateFromSqlite(db) {
@@ -658,12 +791,26 @@ function readStateFromSqlite(db) {
       signName: meta.smsSignName || '',
       templateId: meta.smsTemplateId || ''
     },
+    paymentProvider: meta.paymentProvider || defaultPaymentProvider,
     yipayConfig: {
       enabled: meta.yipayEnabled === '1',
       gateway: meta.yipayGateway || defaultYipayGateway,
       pid: meta.yipayPid || '',
       key: meta.yipayKey || '',
       type: meta.yipayType || 'wxpay'
+    },
+    lakalaConfig: {
+      enabled: meta.lakalaEnabled === '1',
+      gateway: meta.lakalaGateway || defaultLakalaGateway,
+      appId: meta.lakalaAppId || '',
+      serialNo: meta.lakalaSerialNo || '',
+      privateKey: meta.lakalaPrivateKey || '',
+      publicKey: meta.lakalaPublicKey || '',
+      mercId: meta.lakalaMercId || '',
+      termNo: meta.lakalaTermNo || '',
+      merName: meta.lakalaMerName || '',
+      orderSource: meta.lakalaOrderSource || '',
+      codeValidPeriod: meta.lakalaCodeValidPeriod || '180'
     },
     employees,
     activities: db.prepare('SELECT * FROM activities ORDER BY created_at DESC').all().map((r) => ({
@@ -688,6 +835,7 @@ function readStateFromSqlite(db) {
     paymentOrders: db.prepare('SELECT * FROM payment_orders ORDER BY created_at DESC').all().map((r) => ({
       outTradeNo: r.out_trade_no,
       tradeNo: r.trade_no || '',
+      provider: r.provider || 'yipay',
       employeeId: r.employee_id,
       employeeSlug: r.employee_slug || '',
       giftId: r.gift_id,
@@ -695,6 +843,9 @@ function readStateFromSqlite(db) {
       money: r.money,
       phone: r.phone || '',
       payType: r.pay_type,
+      checkoutUrl: r.checkout_url || '',
+      checkoutPayload: r.checkout_payload || '',
+      checkoutExpiresAt: r.checkout_expires_at || '',
       status: r.status,
       createdAt: r.created_at,
       paidAt: r.paid_at || ''
@@ -723,11 +874,23 @@ function writeStateToSqlite(db, state) {
       smsRegion: next.smsConfig.region,
       smsSignName: next.smsConfig.signName,
       smsTemplateId: next.smsConfig.templateId,
+      paymentProvider: next.paymentProvider,
       yipayEnabled: next.yipayConfig.enabled ? '1' : '0',
       yipayGateway: next.yipayConfig.gateway,
       yipayPid: next.yipayConfig.pid,
       yipayKey: next.yipayConfig.key,
       yipayType: next.yipayConfig.type,
+      lakalaEnabled: next.lakalaConfig.enabled ? '1' : '0',
+      lakalaGateway: next.lakalaConfig.gateway,
+      lakalaAppId: next.lakalaConfig.appId,
+      lakalaSerialNo: next.lakalaConfig.serialNo,
+      lakalaPrivateKey: next.lakalaConfig.privateKey,
+      lakalaPublicKey: next.lakalaConfig.publicKey,
+      lakalaMercId: next.lakalaConfig.mercId,
+      lakalaTermNo: next.lakalaConfig.termNo,
+      lakalaMerName: next.lakalaConfig.merName,
+      lakalaOrderSource: next.lakalaConfig.orderSource,
+      lakalaCodeValidPeriod: String(next.lakalaConfig.codeValidPeriod),
       passwordSalt: next.passwordSalt,
       customerSecret: next.customerSecret,
       updatedAt: next.updatedAt
@@ -754,8 +917,8 @@ function writeStateToSqlite(db, state) {
     const insertLogin = db.prepare('INSERT INTO customer_logins (id, phone, employee_id, method, created_at) VALUES (?, ?, ?, ?, ?)');
     for (const c of next.customerLogins) insertLogin.run(c.id, c.phone, c.employeeId || '', c.method, c.createdAt);
 
-    const insertOrder = db.prepare('INSERT INTO payment_orders (out_trade_no, trade_no, employee_id, employee_slug, gift_id, gift_name, money, phone, pay_type, status, created_at, paid_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    for (const o of next.paymentOrders) insertOrder.run(o.outTradeNo, o.tradeNo, o.employeeId, o.employeeSlug, o.giftId, o.giftName, o.money, o.phone, o.payType, o.status, o.createdAt, o.paidAt);
+    const insertOrder = db.prepare('INSERT INTO payment_orders (out_trade_no, trade_no, provider, employee_id, employee_slug, gift_id, gift_name, money, phone, pay_type, checkout_url, checkout_payload, checkout_expires_at, status, created_at, paid_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    for (const o of next.paymentOrders) insertOrder.run(o.outTradeNo, o.tradeNo, o.provider, o.employeeId, o.employeeSlug, o.giftId, o.giftName, o.money, o.phone, o.payType, o.checkoutUrl, o.checkoutPayload, o.checkoutExpiresAt, o.status, o.createdAt, o.paidAt);
     db.exec('COMMIT');
   } catch (error) {
     try { db.exec('ROLLBACK'); } catch {}
@@ -989,6 +1152,12 @@ function redirect(res, location) {
 }
 
 async function readJson(request, maxBytes = 6_000_000) {
+  const raw = await readRawText(request, maxBytes);
+  if (!raw) return {};
+  return JSON.parse(raw);
+}
+
+async function readRawText(request, maxBytes = 6_000_000) {
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
@@ -996,9 +1165,7 @@ async function readJson(request, maxBytes = 6_000_000) {
     if (size > maxBytes) throw new Error('Request body is too large.');
     chunks.push(chunk);
   }
-  const raw = Buffer.concat(chunks).toString('utf8').trim();
-  if (!raw) return {};
-  return JSON.parse(raw);
+  return Buffer.concat(chunks).toString('utf8').trim();
 }
 
 function externalBaseUrl(state, request) {
@@ -1031,9 +1198,158 @@ function buildYipaySubmitUrl(cfg, params) {
   return url.toString();
 }
 
+function lakalaNonce() {
+  return crypto.randomBytes(9).toString('base64url').slice(0, 12);
+}
+
+function lakalaReqId() {
+  return crypto.randomBytes(16).toString('hex');
+}
+
+function moneyToCents(money) {
+  const n = Number(money);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  return String(Math.round(n * 100));
+}
+
+function signLakalaGateway(cfg, body, timestamp, nonce) {
+  const preSign = `${cfg.appId}\n${cfg.serialNo}\n${timestamp}\n${nonce}\n${body}\n`;
+  return crypto.createSign('RSA-SHA256').update(preSign, 'utf8').sign(cfg.privateKey, 'base64');
+}
+
+function verifyLakalaSignature(publicKey, data, signature) {
+  try {
+    return crypto.createVerify('RSA-SHA256').update(data, 'utf8').verify(publicKey, Buffer.from(signature, 'base64'));
+  } catch {
+    return false;
+  }
+}
+
+function verifyLakalaGatewayResponse(cfg, headers, body) {
+  const signature = String(headers['lklapi-signature'] || '').trim();
+  if (!signature) return false;
+  const appId = String(headers['lklapi-appid'] || cfg.appId || '').trim();
+  const serialNo = String(headers['lklapi-serial'] || '').trim();
+  const timestamp = String(headers['lklapi-timestamp'] || '').trim();
+  const nonce = String(headers['lklapi-nonce'] || '').trim();
+  if (!timestamp || !nonce) return false;
+  const preSign = `${appId}\n${serialNo}\n${timestamp}\n${nonce}\n${body}\n`;
+  return verifyLakalaSignature(cfg.publicKey, preSign, signature);
+}
+
+function parseLakalaAuthorization(header) {
+  const text = String(header || '');
+  const fields = {};
+  for (const match of text.matchAll(/([a-zA-Z_]+)="?([^",]+)"?/g)) fields[match[1]] = match[2];
+  return fields;
+}
+
+function verifyLakalaNotification(cfg, headers, body) {
+  const auth = parseLakalaAuthorization(headers.authorization);
+  const signature = auth.signature || String(headers['lklapi-signature'] || '').trim();
+  const timestamp = auth.timestamp || String(headers['lklapi-timestamp'] || '').trim();
+  const nonce = auth.nonce_str || auth.nonce || String(headers['lklapi-nonce'] || '').trim();
+  if (!signature || !timestamp || !nonce || !cfg.publicKey) return false;
+  const notifyPreSign = `${timestamp}\n${nonce}\n${body}\n`;
+  if (verifyLakalaSignature(cfg.publicKey, notifyPreSign, signature)) return true;
+  const appId = auth.appid || cfg.appId || '';
+  const serialNo = auth.serial_no || String(headers['lklapi-serial'] || '').trim();
+  const gatewayPreSign = `${appId}\n${serialNo}\n${timestamp}\n${nonce}\n${body}\n`;
+  return verifyLakalaSignature(cfg.publicKey, gatewayPreSign, signature);
+}
+
+function callLakalaApi(cfg, payload) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify(payload);
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const nonce = lakalaNonce();
+    let signature;
+    try {
+      signature = signLakalaGateway(cfg, body, timestamp, nonce);
+    } catch (error) {
+      reject(new Error(`拉卡拉签名失败：${error.message}`));
+      return;
+    }
+    const url = new URL(cfg.gateway);
+    const httpClient = url.protocol === 'http:' ? http : https;
+    const req = httpClient.request(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'accept': 'application/json',
+        'authorization': `LKLAPI-SHA256withRSA appid="${cfg.appId}",serial_no="${cfg.serialNo}",timestamp="${timestamp}",nonce_str="${nonce}",signature="${signature}"`,
+        'content-length': Buffer.byteLength(body).toString()
+      }
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8');
+        if (!verifyLakalaGatewayResponse(cfg, res.headers, raw)) {
+          reject(new Error('拉卡拉响应验签失败。'));
+          return;
+        }
+        try {
+          const parsed = JSON.parse(raw || '{}');
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            reject(new Error(`拉卡拉 HTTP ${res.statusCode}`));
+            return;
+          }
+          if (parsed.retCode && parsed.retCode !== '000000') {
+            reject(new Error(`拉卡拉：${parsed.retCode} ${parsed.retMsg || '交易失败'}`));
+            return;
+          }
+          resolve(parsed);
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+async function createLakalaPayment(cfg, order, baseUrl) {
+  const now = new Date();
+  const expires = new Date(now.getTime() + cfg.codeValidPeriod * 1000);
+  const payload = {
+    reqData: {
+      mercId: cfg.mercId,
+      termNo: cfg.termNo,
+      merName: cfg.merName,
+      codeValidPeriod: String(cfg.codeValidPeriod),
+      orderField: {
+        amount: moneyToCents(order.money),
+        exterOrderSource: cfg.orderSource,
+        exterMerOrderNo: order.outTradeNo,
+        subject: order.giftName.slice(0, 40),
+        orderRemark: order.employeeSlug
+      },
+      txnField: {
+        settleType: '0',
+        notifyUrl: `${baseUrl}/api/pay/lakala/notify`,
+        attach: order.employeeSlug
+      }
+    },
+    ver: '1.0.0',
+    timestamp: String(Date.now()),
+    reqId: lakalaReqId()
+  };
+  const result = await callLakalaApi(cfg, payload);
+  const qrCodeUrl = String(result.respData?.qrCodeUrl || result.respData?.qrCode || '').trim();
+  if (!qrCodeUrl) throw new Error('拉卡拉未返回二维码地址。');
+  return {
+    checkoutUrl: qrCodeUrl,
+    checkoutPayload: JSON.stringify(result.respData || {}),
+    checkoutExpiresAt: expires.toISOString()
+  };
+}
+
 async function markOrderPaid(state, order, notifyParams = {}) {
   const now = new Date().toISOString();
-  const tradeNo = String(notifyParams.trade_no || order.tradeNo || '').slice(0, 64);
+  const tradeNo = String(notifyParams.trade_no || notifyParams.payOrderNo || notifyParams.lklOrderNo || notifyParams.accountChannelOrderNo || order.tradeNo || '').slice(0, 64);
   const employees = state.employees.map((e) => {
     if (e.id !== order.employeeId) return e;
     const lit = new Set(e.litGiftIds);
@@ -1048,7 +1364,7 @@ async function markOrderPaid(state, order, notifyParams = {}) {
     giftName: order.giftName,
     price: Number(order.money),
     phone: order.phone,
-    paymentProvider: 'yipay',
+    paymentProvider: order.provider || 'yipay',
     outTradeNo: order.outTradeNo,
     tradeNo,
     createdAt: now
@@ -1065,11 +1381,13 @@ async function markOrderPaid(state, order, notifyParams = {}) {
  * ============================================================ */
 function publicEmployeeView(state, employee) {
   const catalog = withCatalog(state);
-  const yipay = effectiveYipayConfig(state);
+  const provider = activePaymentProvider(state);
   return {
     brandName: state.brandName,
     smsRequired: isSmsActuallyEnabled(state.smsConfig),
-    paymentReady: isYipayActuallyEnabled(yipay),
+    paymentReady: isActivePaymentReady(state),
+    paymentProvider: provider,
+    paymentProviderName: paymentProviderName(provider),
     employee: {
       slug: employee.slug,
       name: employee.name,
@@ -1081,7 +1399,7 @@ function publicEmployeeView(state, employee) {
   };
 }
 
-function selfEmployeeView(state, employee) {
+function selfEmployeeView(employee) {
   return {
     id: employee.id,
     slug: employee.slug,
@@ -1162,6 +1480,7 @@ async function clearImagesByPrefix(dir, baseName) {
 async function handleApi(request, response, pathname, query) {
   const state = await ensureStateFile();
   const yipay = effectiveYipayConfig(state);
+  const lakala = effectiveLakalaConfig(state);
 
   /* ---------- 易支付回调 ---------- */
 
@@ -1172,9 +1491,32 @@ async function handleApi(request, response, pathname, query) {
     const outTradeNo = query.get('out_trade_no') || '';
     const order = state.paymentOrders.find((o) => o.outTradeNo === outTradeNo);
     if (!order) { sendText(response, 404, 'fail'); return; }
+    if ((order.provider || 'yipay') !== 'yipay') { sendText(response, 400, 'fail'); return; }
     if (normalizeMoney(query.get('money')) !== order.money) { sendText(response, 400, 'fail'); return; }
     if (order.status !== 'paid') await markOrderPaid(state, order, Object.fromEntries(query.entries()));
     sendText(response, 200, 'success');
+    return;
+  }
+
+  if (request.method === 'POST' && pathname === '/api/pay/lakala/notify') {
+    const raw = await readRawText(request);
+    const notifySuccess = (message = '执行成功') => sendJson(response, 200, { code: 'SUCCESS', message });
+    const notifyFail = (status, message) => sendJson(response, status, { code: 'FAIL', message });
+    if (!isLakalaActuallyEnabled(lakala)) { notifyFail(503, '拉卡拉未配置'); return; }
+    if (!verifyLakalaNotification(lakala, request.headers, raw)) { notifyFail(400, '验签失败'); return; }
+    let body;
+    try { body = JSON.parse(raw || '{}'); } catch { notifyFail(400, 'JSON 解析失败'); return; }
+    const outTradeNo = String(body.merchantOrderNo || body.exterMerOrderNo || body.orderId || body.outTradeNo || '').trim();
+    const order = state.paymentOrders.find((o) => o.outTradeNo === outTradeNo);
+    if (!order) { notifyFail(404, '订单不存在'); return; }
+    if (order.provider !== 'lakala') { notifyFail(400, '订单通道不匹配'); return; }
+    const merchantNo = String(body.merchantNo || body.mercId || body.tradeMerchantNo || '').trim();
+    if (merchantNo && merchantNo !== lakala.mercId) { notifyFail(400, '商户号不匹配'); return; }
+    const amount = body.amount === undefined || body.amount === null ? '' : String(body.amount);
+    if (amount && amount !== moneyToCents(order.money)) { notifyFail(400, '金额不匹配'); return; }
+    if (body.payStatus !== 'S') { notifySuccess(); return; }
+    if (order.status !== 'paid') await markOrderPaid(state, order, body);
+    notifySuccess();
     return;
   }
 
@@ -1184,7 +1526,7 @@ async function handleApi(request, response, pathname, query) {
     let outcome = 'unknown';
     if (verifyYipayParams(query, yipay) && query.get('trade_status') === 'TRADE_SUCCESS') {
       const order = state.paymentOrders.find((o) => o.outTradeNo === (query.get('out_trade_no') || ''));
-      if (order) {
+      if (order && (order.provider || 'yipay') === 'yipay') {
         targetSlug = order.employeeSlug || targetSlug;
         if (normalizeMoney(query.get('money')) === order.money) {
           outcome = 'success';
@@ -1285,7 +1627,8 @@ async function handleApi(request, response, pathname, query) {
     const giftId = payMatch[2];
     const customer = authenticateCustomer(state, request);
     if (!customer) { sendError(response, 401, '请先用手机号登录。'); return; }
-    if (!isYipayActuallyEnabled(yipay)) { sendError(response, 503, '支付暂未配置，请联系管理员。'); return; }
+    const provider = activePaymentProvider(state);
+    if (!isActivePaymentReady(state)) { sendError(response, 503, `${paymentProviderName(provider)}支付暂未配置，请联系管理员。`); return; }
     const employee = state.employees.find((e) => e.slug === slug);
     if (!employee || !employee.enabled) { sendError(response, 404, '员工不存在或已下架。'); return; }
     const baseGift = gifts.find((g) => g.id === giftId);
@@ -1309,14 +1652,31 @@ async function handleApi(request, response, pathname, query) {
       giftName,
       money,
       phone: customer.phone,
-      payType: yipay.type,
+      provider,
+      payType: provider === 'lakala' ? 'dynamic_qr' : yipay.type,
+      checkoutUrl: '',
+      checkoutPayload: '',
+      checkoutExpiresAt: '',
       status: 'pending',
       createdAt: new Date().toISOString(),
       paidAt: ''
     };
+
+    if (provider === 'lakala') {
+      try {
+        const checkout = await createLakalaPayment(lakala, order, baseUrl);
+        const lakalaOrder = { ...order, ...checkout };
+        const paymentOrders = [lakalaOrder, ...state.paymentOrders];
+        await writeState({ ...state, paymentOrders });
+        sendJson(response, 200, { outTradeNo, provider, providerName: paymentProviderName(provider), paymentUrl: lakalaOrder.checkoutUrl });
+      } catch (error) {
+        sendError(response, 502, error.message || '拉卡拉订单创建失败。');
+      }
+      return;
+    }
+
     const paymentOrders = [order, ...state.paymentOrders];
     await writeState({ ...state, paymentOrders });
-
     const params = {
       pid: yipay.pid,
       type: yipay.type,
@@ -1327,13 +1687,13 @@ async function handleApi(request, response, pathname, query) {
       money,
       param: employee.slug
     };
-    sendJson(response, 200, { outTradeNo, paymentUrl: buildYipaySubmitUrl(yipay, params) });
+    sendJson(response, 200, { outTradeNo, provider, providerName: paymentProviderName(provider), paymentUrl: buildYipaySubmitUrl(yipay, params) });
     return;
   }
 
   const lightMatch = pathname.match(/^\/api\/employees\/([a-z0-9-]+)\/gifts\/([a-z0-9-]+)\/light$/);
   if (request.method === 'POST' && lightMatch) {
-    sendError(response, 410, '请通过易支付完成付款后自动点亮。');
+    sendError(response, 410, '请通过支付通道完成付款后自动点亮。');
     return;
   }
 
@@ -1352,7 +1712,7 @@ async function handleApi(request, response, pathname, query) {
     sendJson(response, 200, {
       token: makeStaffToken(slug, password),
       role: employee.role,
-      employee: selfEmployeeView(state, employee)
+      employee: selfEmployeeView(employee)
     });
     return;
   }
@@ -1360,7 +1720,7 @@ async function handleApi(request, response, pathname, query) {
   if (request.method === 'GET' && pathname === '/api/auth/me') {
     const me = authenticateStaff(state, request);
     if (!me) { sendError(response, 401, '未登录。'); return; }
-    sendJson(response, 200, { role: me.role, employee: selfEmployeeView(state, me) });
+    sendJson(response, 200, { role: me.role, employee: selfEmployeeView(me) });
     return;
   }
 
@@ -1376,7 +1736,7 @@ async function handleApi(request, response, pathname, query) {
       }));
       sendJson(response, 200, {
         role: me.role,
-        employee: selfEmployeeView(state, me),
+        employee: selfEmployeeView(me),
         activities: myActs.slice(0, 100),
         catalog: withCatalog(state, true),
         smsRequired: isSmsActuallyEnabled(state.smsConfig),
@@ -1395,7 +1755,7 @@ async function handleApi(request, response, pathname, query) {
         updatedAt: new Date().toISOString()
       } : e);
       const next = await writeState({ ...state, employees });
-      sendJson(response, 200, { employee: selfEmployeeView(next, next.employees.find((e) => e.id === me.id)) });
+      sendJson(response, 200, { employee: selfEmployeeView(next.employees.find((e) => e.id === me.id)) });
       return;
     }
 
@@ -1427,7 +1787,7 @@ async function handleApi(request, response, pathname, query) {
         const avatarPath = `/assets/employees/${me.id}/${fileName}?v=${Date.now()}`;
         const employees = state.employees.map((e) => e.id === me.id ? { ...e, avatarPath, updatedAt: new Date().toISOString() } : e);
         const next = await writeState({ ...state, employees });
-        sendJson(response, 200, { employee: selfEmployeeView(next, next.employees.find((e) => e.id === me.id)) });
+        sendJson(response, 200, { employee: selfEmployeeView(next.employees.find((e) => e.id === me.id)) });
       } catch (err) { sendError(response, 400, err.message); }
       return;
     }
@@ -1435,7 +1795,7 @@ async function handleApi(request, response, pathname, query) {
     if (request.method === 'POST' && pathname === '/api/me/reset') {
       const employees = state.employees.map((e) => e.id === me.id ? { ...e, litGiftIds: [], updatedAt: new Date().toISOString() } : e);
       const next = await writeState({ ...state, employees });
-      sendJson(response, 200, { employee: selfEmployeeView(next, next.employees.find((e) => e.id === me.id)) });
+      sendJson(response, 200, { employee: selfEmployeeView(next.employees.find((e) => e.id === me.id)) });
       return;
     }
   }
@@ -1452,7 +1812,9 @@ async function handleApi(request, response, pathname, query) {
         brandName: state.brandName,
         siteUrl: state.siteUrl,
         defaultWechatPayUrl: state.defaultWechatPayUrl,
+        paymentProvider: activePaymentProvider(state),
         yipay: publicYipayConfigView(yipay),
+        lakala: publicLakalaConfigView(lakala),
         catalog: withCatalog(state, true),
         employees: state.employees.map(adminEmployeeView),
         sms: publicSmsConfigView(state.smsConfig)
@@ -1478,13 +1840,16 @@ async function handleApi(request, response, pathname, query) {
         ...state,
         brandName: normalizeText(body.brandName, state.brandName, 24),
         siteUrl: nextSiteUrl,
-        defaultWechatPayUrl: normalizeText(body.defaultWechatPayUrl, state.defaultWechatPayUrl, 600)
+        defaultWechatPayUrl: normalizeText(body.defaultWechatPayUrl, state.defaultWechatPayUrl, 600),
+        paymentProvider: validPaymentProvider(body.paymentProvider) ? body.paymentProvider : state.paymentProvider
       });
       sendJson(response, 200, {
         brandName: next.brandName,
         siteUrl: next.siteUrl,
         defaultWechatPayUrl: next.defaultWechatPayUrl,
-        yipay: publicYipayConfigView(effectiveYipayConfig(next))
+        paymentProvider: activePaymentProvider(next),
+        yipay: publicYipayConfigView(effectiveYipayConfig(next)),
+        lakala: publicLakalaConfigView(effectiveLakalaConfig(next))
       });
       return;
     }
@@ -1498,7 +1863,7 @@ async function handleApi(request, response, pathname, query) {
       const nextKey = typeof body.key === 'string' && body.key.trim() && !body.key.includes('****')
         ? body.key.trim().slice(0, 160) : state.yipayConfig.key;
       const nextType = validYipayTypes.has(body.type) ? body.type : state.yipayConfig.type;
-      const hasPendingOrders = state.paymentOrders.some((o) => o.status === 'pending');
+      const hasPendingOrders = state.paymentOrders.some((o) => o.status === 'pending' && (o.provider || 'yipay') === 'yipay');
       const currentEffective = effectiveYipayConfig(state);
       const nextEffectiveKey = nextKey || envYipayKey;
       const changesPaymentIdentity = nextGateway !== state.yipayConfig.gateway || nextPid !== state.yipayConfig.pid || nextType !== state.yipayConfig.type || nextEffectiveKey !== currentEffective.key;
@@ -1516,6 +1881,69 @@ async function handleApi(request, response, pathname, query) {
       };
       const next = await writeState({ ...state, yipayConfig: normalizeYipayConfig(merged) });
       sendJson(response, 200, { yipay: publicYipayConfigView(effectiveYipayConfig(next)) });
+      return;
+    }
+
+    /* 拉卡拉设置 */
+    if (request.method === 'POST' && pathname === '/api/admin/lakala') {
+      const body = await readJson(request);
+      const nextGateway = typeof body.gateway === 'string' ? normalizeLakalaGateway(body.gateway) : state.lakalaConfig.gateway;
+      const nextAppId = typeof body.appId === 'string' && body.appId.trim() && !body.appId.includes('****')
+        ? body.appId.trim().slice(0, 80) : state.lakalaConfig.appId;
+      const nextSerialNo = typeof body.serialNo === 'string' && body.serialNo.trim() && !body.serialNo.includes('****')
+        ? body.serialNo.trim().slice(0, 120) : state.lakalaConfig.serialNo;
+      const nextPrivateKey = typeof body.privateKey === 'string' && body.privateKey.trim()
+        ? body.privateKey.trim().replace(/\\n/g, '\n').slice(0, 6000) : state.lakalaConfig.privateKey;
+      const nextPublicKey = typeof body.publicKey === 'string' && body.publicKey.trim()
+        ? body.publicKey.trim().replace(/\\n/g, '\n').slice(0, 6000) : state.lakalaConfig.publicKey;
+      const nextMercId = typeof body.mercId === 'string' && body.mercId.trim() && !body.mercId.includes('****')
+        ? body.mercId.trim().slice(0, 32) : state.lakalaConfig.mercId;
+      const nextTermNo = typeof body.termNo === 'string' && body.termNo.trim() && !body.termNo.includes('****')
+        ? body.termNo.trim().slice(0, 32) : state.lakalaConfig.termNo;
+      const nextMerName = typeof body.merName === 'string' ? body.merName.trim().slice(0, 128) : state.lakalaConfig.merName;
+      const nextOrderSource = typeof body.orderSource === 'string' ? body.orderSource.trim().slice(0, 16) : state.lakalaConfig.orderSource;
+      const nextCodeValidPeriod = Number.parseInt(body.codeValidPeriod, 10);
+      const hasPendingOrders = state.paymentOrders.some((o) => o.status === 'pending' && o.provider === 'lakala');
+      const currentEffective = effectiveLakalaConfig(state);
+      const nextEffective = {
+        ...currentEffective,
+        gateway: nextGateway,
+        appId: nextAppId || envLakalaAppId,
+        serialNo: nextSerialNo || envLakalaSerialNo,
+        privateKey: nextPrivateKey || envLakalaPrivateKey,
+        publicKey: nextPublicKey || envLakalaPublicKey,
+        mercId: nextMercId || envLakalaMercId,
+        termNo: nextTermNo || envLakalaTermNo,
+        orderSource: nextOrderSource || envLakalaOrderSource
+      };
+      const changesPaymentIdentity = nextEffective.gateway !== currentEffective.gateway
+        || nextEffective.appId !== currentEffective.appId
+        || nextEffective.serialNo !== currentEffective.serialNo
+        || nextEffective.privateKey !== currentEffective.privateKey
+        || nextEffective.publicKey !== currentEffective.publicKey
+        || nextEffective.mercId !== currentEffective.mercId
+        || nextEffective.termNo !== currentEffective.termNo
+        || nextEffective.orderSource !== currentEffective.orderSource;
+      if (hasPendingOrders && changesPaymentIdentity) {
+        sendError(response, 409, '仍有待支付拉卡拉订单，暂不能修改拉卡拉网关、证书、商户号、终端号或订单来源。请等待回调完成或稍后再试。');
+        return;
+      }
+      const merged = {
+        ...state.lakalaConfig,
+        enabled: Boolean(body.enabled),
+        gateway: nextGateway,
+        appId: nextAppId,
+        serialNo: nextSerialNo,
+        privateKey: nextPrivateKey,
+        publicKey: nextPublicKey,
+        mercId: nextMercId,
+        termNo: nextTermNo,
+        merName: nextMerName,
+        orderSource: nextOrderSource,
+        codeValidPeriod: Number.isInteger(nextCodeValidPeriod) ? nextCodeValidPeriod : state.lakalaConfig.codeValidPeriod
+      };
+      const next = await writeState({ ...state, lakalaConfig: normalizeLakalaConfig(merged) });
+      sendJson(response, 200, { lakala: publicLakalaConfigView(effectiveLakalaConfig(next)) });
       return;
     }
 
