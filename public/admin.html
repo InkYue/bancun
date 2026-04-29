@@ -317,12 +317,45 @@
             <label>
               <span>对外访问域名（用于支付回调和复制链接）</span>
               <input id="siteUrlInput" placeholder="https://your-domain.com（生产支付必须填写公网 HTTPS 域名）" />
-              <small class="field-helper">易支付 notify_url / return_url 会使用该域名；示例链接：<code id="siteUrlPreview">/u/...</code></small>
+              <small class="field-helper">支付 notify_url / return_url 会使用该域名；示例链接：<code id="siteUrlPreview">/u/...</code></small>
+            </label>
+            <label><span>当前收款通道</span>
+              <select id="paymentProviderSelect">
+                <option value="yipay">易支付</option>
+                <option value="lakala">拉卡拉</option>
+              </select>
             </label>
             <input id="payUrlInput" type="hidden" />
           </div>
           <div class="form-actions">
             <button id="saveAdminButton" class="primary-button" type="button">保存</button>
+          </div>
+        </article>
+
+        <article class="console-card">
+          <header class="card-header">
+            <h2>拉卡拉</h2>
+            <span id="lakalaStatus" class="card-sub">未配置</span>
+          </header>
+          <p class="admin-tip">客户送礼会创建拉卡拉动态二维码订单，只有收到拉卡拉异步通知且验签成功后才会自动点亮礼物。私钥、公钥证书已设置时留空保存不会覆盖原值。</p>
+          <label class="switch-row">
+            <input id="lakalaEnabled" type="checkbox" />
+            <span>启用拉卡拉</span>
+          </label>
+          <div class="form-grid">
+            <label><span>接口地址</span><input id="lakalaGateway" placeholder="https://s2.lakala.com/labs/txn/labs_dycode_create" /></label>
+            <label><span>appId</span><input id="lakalaAppId" placeholder="拉卡拉分配的 appId" /></label>
+            <label><span>证书序列号 serial_no</span><input id="lakalaSerialNo" placeholder="接入方证书序列号" /></label>
+            <label><span>商户号 mercId</span><input id="lakalaMercId" placeholder="拉卡拉商户号" /></label>
+            <label><span>终端号 termNo</span><input id="lakalaTermNo" placeholder="拉卡拉终端号" /></label>
+            <label><span>商户名称 merName</span><input id="lakalaMerName" placeholder="用于动态二维码下单" /></label>
+            <label><span>订单来源 exterOrderSource</span><input id="lakalaOrderSource" placeholder="由拉卡拉分配" /></label>
+            <label><span>二维码有效期（60-300 秒）</span><input id="lakalaCodeValidPeriod" type="number" min="60" max="300" step="1" placeholder="180" /></label>
+            <label><span>接入方私钥（PEM）</span><textarea id="lakalaPrivateKey" rows="5" autocomplete="off" placeholder="-----BEGIN PRIVATE KEY-----"></textarea></label>
+            <label><span>拉卡拉公钥 / 证书（PEM）</span><textarea id="lakalaPublicKey" rows="5" autocomplete="off" placeholder="-----BEGIN CERTIFICATE-----"></textarea></label>
+          </div>
+          <div class="form-actions">
+            <button id="lakalaSaveButton" class="primary-button" type="button">保存拉卡拉</button>
           </div>
         </article>
 

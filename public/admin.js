@@ -94,6 +94,7 @@ const clearActivitiesButton = $('#clearActivitiesButton');
 const brandInput = $('#brandInput');
 const siteUrlInput = $('#siteUrlInput');
 const siteUrlPreview = $('#siteUrlPreview');
+const paymentProviderSelect = $('#paymentProviderSelect');
 const payUrlInput = $('#payUrlInput');
 const saveAdminButton = $('#saveAdminButton');
 const yipayStatus = $('#yipayStatus');
@@ -103,6 +104,19 @@ const yipayPid = $('#yipayPid');
 const yipayKey = $('#yipayKey');
 const yipayType = $('#yipayType');
 const yipaySaveButton = $('#yipaySaveButton');
+const lakalaStatus = $('#lakalaStatus');
+const lakalaEnabled = $('#lakalaEnabled');
+const lakalaGateway = $('#lakalaGateway');
+const lakalaAppId = $('#lakalaAppId');
+const lakalaSerialNo = $('#lakalaSerialNo');
+const lakalaPrivateKey = $('#lakalaPrivateKey');
+const lakalaPublicKey = $('#lakalaPublicKey');
+const lakalaMercId = $('#lakalaMercId');
+const lakalaTermNo = $('#lakalaTermNo');
+const lakalaMerName = $('#lakalaMerName');
+const lakalaOrderSource = $('#lakalaOrderSource');
+const lakalaCodeValidPeriod = $('#lakalaCodeValidPeriod');
+const lakalaSaveButton = $('#lakalaSaveButton');
 const smsStatus = $('#smsStatus');
 const smsEnabled = $('#smsEnabled');
 const smsSecretId = $('#smsSecretId');
@@ -484,7 +498,7 @@ myUrlCopy.addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText(myUrlInput.value);
     showToast('链接已复制');
-  } catch { myUrlInput.select(); document.execCommand('copy'); showToast('链接已复制'); }
+  } catch { myUrlInput.select(); showToast('复制失败，请手动复制输入框链接', 'error'); }
 });
 
 meSaveProfile.addEventListener('click', async () => {
@@ -659,13 +673,7 @@ async function copyEmployeeUrl(e) {
     await navigator.clipboard.writeText(url);
     showToast(`已复制：${url}`);
   } catch {
-    /* 降级：临时 textarea + execCommand */
-    const ta = document.createElement('textarea');
-    ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
-    document.body.append(ta); ta.select();
-    try { document.execCommand('copy'); showToast(`已复制：${url}`); }
-    catch { showToast('复制失败，请手动复制：' + url, 'error'); }
-    ta.remove();
+    showToast('复制失败，请手动复制：' + url, 'error');
   }
 }
 
@@ -939,6 +947,7 @@ function renderSettings() {
   if (!adminState) return;
   brandInput.value = adminState.brandName || '';
   siteUrlInput.value = adminState.siteUrl || '';
+  paymentProviderSelect.value = adminState.paymentProvider || 'yipay';
   updateSiteUrlPreview();
   payUrlInput.value = adminState.defaultWechatPayUrl || '';
   const yipay = adminState.yipay || {};
@@ -957,6 +966,30 @@ function renderSettings() {
   } else {
     yipayStatus.textContent = '未启用';
     yipayStatus.className = 'card-sub';
+  }
+  const lakala = adminState.lakala || {};
+  lakalaEnabled.checked = !!lakala.enabled;
+  lakalaGateway.value = lakala.gateway || 'https://s2.lakala.com/labs/txn/labs_dycode_create';
+  lakalaAppId.value = lakala.appId || '';
+  lakalaSerialNo.value = lakala.serialNo || '';
+  lakalaPrivateKey.value = '';
+  lakalaPrivateKey.placeholder = lakala.privateKeySet ? '已设置 · 留空则不修改' : '请输入接入方私钥 PEM';
+  lakalaPublicKey.value = '';
+  lakalaPublicKey.placeholder = lakala.publicKeySet ? '已设置 · 留空则不修改' : '请输入拉卡拉公钥 / 证书 PEM';
+  lakalaMercId.value = lakala.mercId || '';
+  lakalaTermNo.value = lakala.termNo || '';
+  lakalaMerName.value = lakala.merName || '';
+  lakalaOrderSource.value = lakala.orderSource || '';
+  lakalaCodeValidPeriod.value = lakala.codeValidPeriod || 180;
+  if (lakala.actuallyEnabled) {
+    lakalaStatus.textContent = '已启用';
+    lakalaStatus.className = 'card-sub status-ok';
+  } else if (lakala.enabled) {
+    lakalaStatus.textContent = '已开启但配置不完整';
+    lakalaStatus.className = 'card-sub status-warn';
+  } else {
+    lakalaStatus.textContent = '未启用';
+    lakalaStatus.className = 'card-sub';
   }
   const sms = adminState.sms || {};
   smsEnabled.checked = !!sms.enabled;
@@ -993,7 +1026,8 @@ saveAdminButton.addEventListener('click', async () => {
       body: JSON.stringify({
         brandName: brandInput.value,
         siteUrl: siteUrlInput.value,
-        defaultWechatPayUrl: payUrlInput.value
+        defaultWechatPayUrl: payUrlInput.value,
+        paymentProvider: paymentProviderSelect.value
       })
     });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || '保存失败');
@@ -1001,7 +1035,9 @@ saveAdminButton.addEventListener('click', async () => {
     adminState.brandName = data.brandName;
     adminState.siteUrl = data.siteUrl;
     adminState.defaultWechatPayUrl = data.defaultWechatPayUrl;
+    adminState.paymentProvider = data.paymentProvider;
     if (data.yipay) adminState.yipay = data.yipay;
+    if (data.lakala) adminState.lakala = data.lakala;
     /* siteUrl 影响所有视图的链接和支付回调，整体重渲 */
     render();
     showToast('已保存');
@@ -1026,6 +1062,33 @@ yipaySaveButton.addEventListener('click', async () => {
     adminState.yipay = data.yipay;
     renderSettings();
     showToast('易支付配置已保存');
+  } catch (e) { showToast(e.message, 'error'); }
+});
+
+lakalaSaveButton.addEventListener('click', async () => {
+  try {
+    const body = {
+      enabled: lakalaEnabled.checked,
+      gateway: lakalaGateway.value,
+      merName: lakalaMerName.value,
+      orderSource: lakalaOrderSource.value,
+      codeValidPeriod: lakalaCodeValidPeriod.value
+    };
+    if (lakalaAppId.value && !lakalaAppId.value.includes('****')) body.appId = lakalaAppId.value;
+    if (lakalaSerialNo.value && !lakalaSerialNo.value.includes('****')) body.serialNo = lakalaSerialNo.value;
+    if (lakalaPrivateKey.value) body.privateKey = lakalaPrivateKey.value;
+    if (lakalaPublicKey.value) body.publicKey = lakalaPublicKey.value;
+    if (lakalaMercId.value && !lakalaMercId.value.includes('****')) body.mercId = lakalaMercId.value;
+    if (lakalaTermNo.value && !lakalaTermNo.value.includes('****')) body.termNo = lakalaTermNo.value;
+    const r = await fetch('/api/admin/lakala', {
+      method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }),
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || '保存失败');
+    const data = await r.json();
+    adminState.lakala = data.lakala;
+    renderSettings();
+    showToast('拉卡拉配置已保存');
   } catch (e) { showToast(e.message, 'error'); }
 });
 

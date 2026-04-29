@@ -418,7 +418,7 @@ async function startPay(gift, quantity = 1) {
     const data = await createPayment(gift, quantity);
     if (!data.paymentUrl) throw new Error('支付链接生成失败。');
     savePendingGift(gift);
-    showToast('订单已创建，正在前往易支付。');
+    showToast(`订单已创建，正在前往${data.providerName || appState.paymentProviderName || '支付通道'}。`);
     window.location.href = data.paymentUrl;
   } catch (err) {
     showToast(err.message || '支付失败。');
